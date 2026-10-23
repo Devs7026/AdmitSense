@@ -1,0 +1,10 @@
+@"
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.streamlit/secrets.toml
+exports/*
+!exports/.gitkeep
+"@ | Set-Content .gitignore

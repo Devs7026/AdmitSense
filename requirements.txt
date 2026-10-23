@@ -1,0 +1,8 @@
+@"
+streamlit
+groq
+pypdf
+pydantic
+python-dotenv
+pytest
+"@ | Set-Content requirements.txt
