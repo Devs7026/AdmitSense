@@ -7,5 +7,7 @@ __pycache__/
 .streamlit/secrets.toml
 exports/*
 !exports/.gitkeep
-data/
+data/*
+!data/hospitals/
+!data/hospitals/**
 *.db
