@@ -8,11 +8,11 @@ def apply_custom_styles() -> None:
         """
         <style>
         /* ==========================================================================
-           AdmitSense Design System & Contrast Optimization
-           Guarantees high-contrast, crystal-clear readability in both Light and Dark themes
+           AdmitSense Design System & Contrast Optimization (Dark & High-Contrast Mode)
+           Guarantees crisp, luminous readability: no white-on-white and no black-on-black.
            ========================================================================== */
 
-        /* Base Typography & Streamlit Markdown Invariants */
+        /* Base Typography */
         [data-testid="stMarkdownContainer"] p,
         [data-testid="stMarkdownContainer"] span,
         [data-testid="stMarkdownContainer"] strong,
@@ -20,20 +20,19 @@ def apply_custom_styles() -> None:
             letter-spacing: -0.01em;
         }
 
-        /* Streamlit Dark & Light Theme Adaptive Variables */
-        :root {
-            --as-text-primary: var(--text-color, #0f172a);
-            --as-text-muted: #64748b;
-            --as-card-bg: var(--secondary-background-color, #ffffff);
-            --as-card-border: rgba(148, 163, 184, 0.25);
-            --as-accent-blue: #2563eb;
-            --as-accent-purple: #7c3aed;
-            --as-accent-amber: #d97706;
-            --as-accent-emerald: #059669;
-            --as-accent-rose: #e11d48;
+        /* All Inline Code & Monospace Badges (Fixes Black-on-Black) */
+        code,
+        [data-testid="stMarkdownContainer"] code {
+            background-color: rgba(56, 189, 248, 0.12) !important;
+            color: #38bdf8 !important;
+            border: 1px solid rgba(56, 189, 248, 0.28) !important;
+            padding: 0.15rem 0.42rem !important;
+            border-radius: 4px !important;
+            font-size: 0.88em !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
         }
 
-        /* Header Component */
+        /* App Header */
         .admit-header {
             background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
             padding: 1.25rem 1.5rem;
@@ -41,7 +40,7 @@ def apply_custom_styles() -> None:
             color: #f8fafc !important;
             margin-bottom: 1.25rem;
             border: 1px solid #334155;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
         }
         .admit-header h1 {
             color: #ffffff !important;
@@ -58,53 +57,53 @@ def apply_custom_styles() -> None:
 
         /* Medical Emergency Notice */
         .emergency-banner {
-            background-color: rgba(245, 158, 11, 0.15) !important;
+            background-color: rgba(245, 158, 11, 0.16) !important;
             border: 1px solid rgba(245, 158, 11, 0.4) !important;
             border-left: 5px solid #f59e0b !important;
-            color: #b45309 !important;
+            color: #fde68a !important;
             padding: 0.85rem 1.15rem !important;
             border-radius: 6px !important;
             margin-bottom: 1rem !important;
             font-size: 0.92rem !important;
             font-weight: 500 !important;
-            line-height: 1.45 !important;
+            line-height: 1.5 !important;
         }
         .emergency-banner strong,
         .emergency-banner span {
-            color: #92400e !important;
+            color: #fef08a !important;
         }
 
         /* Pre-authorisation Status Banner */
         .auth-banner-box {
-            background-color: var(--secondary-background-color, #f8fafc) !important;
-            border: 1px solid rgba(148, 163, 184, 0.3) !important;
+            background-color: #1e293b !important;
+            border: 1px solid #334155 !important;
             border-radius: 6px !important;
             padding: 0.75rem 1rem !important;
             margin-bottom: 1rem !important;
         }
         .auth-banner-box span,
         .auth-banner-box strong {
-            color: var(--text-color, #1e293b) !important;
+            color: #f8fafc !important;
         }
         .auth-banner-box p {
-            color: var(--text-color, #64748b) !important;
-            opacity: 0.85;
+            color: #94a3b8 !important;
             margin: 0.35rem 0 0 0 !important;
             font-size: 0.82rem !important;
+            line-height: 1.4 !important;
         }
 
         /* Recommended Next Action Card */
         .next-action-card {
-            background-color: rgba(37, 99, 235, 0.12) !important;
-            border: 1px solid rgba(37, 99, 235, 0.35) !important;
-            border-left: 5px solid #2563eb !important;
+            background-color: rgba(30, 58, 138, 0.35) !important;
+            border: 1px solid rgba(59, 130, 246, 0.45) !important;
+            border-left: 5px solid #3b82f6 !important;
             padding: 1rem 1.25rem !important;
             border-radius: 8px !important;
             margin-bottom: 1.25rem !important;
         }
         .next-action-card h4 {
             margin: 0 0 0.35rem 0 !important;
-            color: #1d4ed8 !important;
+            color: #60a5fa !important;
             font-size: 1.05rem !important;
             font-weight: 700 !important;
         }
@@ -112,118 +111,104 @@ def apply_custom_styles() -> None:
         .next-action-card span,
         .next-action-card strong {
             margin: 0 !important;
-            color: var(--text-color, #1e40af) !important;
+            color: #f1f5f9 !important;
             font-size: 0.95rem !important;
             line-height: 1.5 !important;
         }
 
         /* Generic Fact Card / Checklist Item Card */
         .fact-card {
-            background-color: var(--secondary-background-color, #ffffff) !important;
-            border: 1px solid rgba(148, 163, 184, 0.25) !important;
+            background-color: #1e293b !important;
+            border: 1px solid #334155 !important;
             border-radius: 8px !important;
             padding: 0.9rem 1.15rem !important;
             margin-bottom: 0.6rem !important;
-            color: var(--text-color, #0f172a) !important;
+            color: #f8fafc !important;
         }
         .fact-card strong {
-            color: var(--text-color, #0f172a) !important;
+            color: #ffffff !important;
             font-weight: 700 !important;
         }
         .fact-card p,
         .fact-card span,
         .fact-card div {
-            color: var(--text-color, #334155) !important;
-        }
-        .fact-card code {
-            background-color: rgba(148, 163, 184, 0.18) !important;
-            color: var(--text-color, #0f172a) !important;
-            padding: 0.15rem 0.4rem !important;
-            border-radius: 4px !important;
+            color: #e2e8f0 !important;
         }
 
-        /* Cited Evidence Card & Quotes */
+        /* Cited Evidence Card & Quotes (Fixes Quote Readability) */
         .evidence-quote-box {
-            background-color: rgba(148, 163, 184, 0.1) !important;
-            border: 1px solid rgba(148, 163, 184, 0.25) !important;
-            border-left: 4px solid #2563eb !important;
-            padding: 0.65rem 0.95rem !important;
+            background-color: rgba(30, 41, 59, 0.85) !important;
+            border: 1px solid #334155 !important;
+            border-left: 4px solid #3b82f6 !important;
+            padding: 0.75rem 1rem !important;
             border-radius: 6px !important;
-            margin-bottom: 0.5rem !important;
-            font-size: 0.9rem !important;
+            margin-bottom: 0.6rem !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
         }
         .evidence-quote-box em {
-            color: var(--text-color, #1e293b) !important;
+            color: #f8fafc !important;
             font-style: italic !important;
             font-weight: 500 !important;
             display: block !important;
-            margin-bottom: 0.35rem !important;
-            line-height: 1.45 !important;
+            margin-bottom: 0.45rem !important;
+            line-height: 1.55 !important;
+            font-size: 0.95rem !important;
         }
-        .evidence-quote-box span,
-        .evidence-quote-box strong {
-            color: var(--text-color, #475569) !important;
+        .evidence-quote-box span {
+            color: #94a3b8 !important;
             font-size: 0.82rem !important;
         }
-        .evidence-quote-box code {
-            background-color: rgba(148, 163, 184, 0.2) !important;
-            color: var(--text-color, #0f172a) !important;
-            padding: 0.1rem 0.35rem !important;
-            border-radius: 4px !important;
+        .evidence-quote-box strong {
+            color: #f1f5f9 !important;
+            font-weight: 700 !important;
         }
 
         /* Hospital Reference Box */
         .hospital-box {
-            background-color: rgba(139, 92, 246, 0.08) !important;
-            border: 1px solid rgba(139, 92, 246, 0.3) !important;
-            border-left: 5px solid #8b5cf6 !important;
+            background-color: rgba(88, 28, 135, 0.25) !important;
+            border: 1px solid rgba(168, 85, 247, 0.4) !important;
+            border-left: 5px solid #a855f7 !important;
             border-radius: 8px !important;
             padding: 0.95rem 1.25rem !important;
             margin-top: 0.5rem !important;
-            color: var(--text-color, #1e1b4b) !important;
+            color: #f8fafc !important;
         }
         .hospital-box h4 {
             margin: 0.35rem 0 0.2rem 0 !important;
             font-size: 1.1rem !important;
-            color: var(--text-color, #1e1b4b) !important;
+            color: #e9d5ff !important;
             font-weight: 700 !important;
         }
         .hospital-box strong,
         .hospital-box span,
         .hospital-box div {
-            color: var(--text-color, #334155) !important;
+            color: #e2e8f0 !important;
         }
         .hospital-box code {
-            background-color: rgba(139, 92, 246, 0.18) !important;
-            color: var(--text-color, #4c1d95) !important;
-            padding: 0.15rem 0.4rem !important;
-            border-radius: 4px !important;
+            background-color: rgba(168, 85, 247, 0.25) !important;
+            color: #c084fc !important;
+            border-color: rgba(168, 85, 247, 0.35) !important;
         }
 
         /* Review Packet Status Banner */
         .packet-banner {
-            background-color: var(--secondary-background-color, #f8fafc) !important;
-            border: 1px solid rgba(148, 163, 184, 0.25) !important;
+            background-color: #1e293b !important;
+            border: 1px solid #334155 !important;
             border-radius: 8px !important;
             padding: 0.85rem 1.15rem !important;
             margin-bottom: 0.75rem !important;
+            color: #f8fafc !important;
         }
         .packet-banner span,
         .packet-banner strong,
         .packet-banner div {
-            color: var(--text-color, #1e293b) !important;
-        }
-        .packet-banner code {
-            background-color: rgba(148, 163, 184, 0.2) !important;
-            color: var(--text-color, #0f172a) !important;
-            padding: 0.15rem 0.45rem !important;
-            border-radius: 4px !important;
+            color: #f8fafc !important;
         }
 
         /* Agent Tool Activity Steps */
         .activity-step-box {
-            background-color: var(--secondary-background-color, #f8fafc) !important;
-            border: 1px solid rgba(148, 163, 184, 0.2) !important;
+            background-color: #1e293b !important;
+            border: 1px solid #334155 !important;
             border-radius: 6px !important;
             padding: 0.5rem 0.85rem !important;
             margin-bottom: 0.4rem !important;
@@ -233,77 +218,74 @@ def apply_custom_styles() -> None:
         }
         .activity-step-box span,
         .activity-step-box strong {
-            color: var(--text-color, #334155) !important;
-        }
-        .activity-step-box code {
-            background-color: rgba(148, 163, 184, 0.2) !important;
-            color: var(--text-color, #0f172a) !important;
-            padding: 0.15rem 0.4rem !important;
-            border-radius: 4px !important;
+            color: #f1f5f9 !important;
         }
 
         /* Replay Diff Cards */
         .diff-card-old {
-            background-color: rgba(239, 68, 68, 0.08) !important;
-            border: 1px solid rgba(239, 68, 68, 0.3) !important;
+            background-color: rgba(239, 68, 68, 0.15) !important;
+            border: 1px solid rgba(239, 68, 68, 0.4) !important;
             border-radius: 6px !important;
             padding: 0.85rem 1rem !important;
             height: 100% !important;
         }
         .diff-card-old span,
         .diff-card-old strong {
-            color: #dc2626 !important;
+            color: #fca5a5 !important;
         }
         .diff-card-old p {
-            color: var(--text-color, #7f1d1d) !important;
-            font-size: 0.9rem !important;
+            color: #fecaca !important;
+            font-size: 0.92rem !important;
             margin: 0 !important;
-            line-height: 1.45 !important;
+            line-height: 1.5 !important;
         }
 
         .diff-card-new {
-            background-color: rgba(34, 197, 94, 0.08) !important;
-            border: 1px solid rgba(34, 197, 94, 0.3) !important;
+            background-color: rgba(34, 197, 94, 0.15) !important;
+            border: 1px solid rgba(34, 197, 94, 0.4) !important;
             border-radius: 6px !important;
             padding: 0.85rem 1rem !important;
             height: 100% !important;
         }
         .diff-card-new span,
         .diff-card-new strong {
-            color: #16a34a !important;
+            color: #86efac !important;
         }
         .diff-card-new p {
-            color: var(--text-color, #14532d) !important;
-            font-size: 0.9rem !important;
+            color: #bbf7d0 !important;
+            font-size: 0.92rem !important;
             margin: 0 !important;
-            line-height: 1.45 !important;
+            line-height: 1.5 !important;
         }
 
         /* Export Preview Finding Card */
         .finding-preview-box {
-            border: 1px solid rgba(148, 163, 184, 0.25) !important;
+            border: 1px solid #334155 !important;
             border-radius: 6px !important;
             padding: 0.85rem 1.15rem !important;
             margin-bottom: 0.75rem !important;
-            background-color: var(--secondary-background-color, #ffffff) !important;
+            background-color: #1e293b !important;
+            color: #f8fafc !important;
         }
-        .finding-preview-box strong,
+        .finding-preview-box strong {
+            color: #ffffff !important;
+        }
         .finding-preview-box p,
         .finding-preview-box span,
         .finding-preview-box div {
-            color: var(--text-color, #0f172a) !important;
+            color: #e2e8f0 !important;
         }
 
         /* Extracted Text Monospace Box */
         .extracted-text-viewer {
-            background-color: var(--secondary-background-color, #f8fafc) !important;
-            border: 1px solid rgba(148, 163, 184, 0.25) !important;
+            background-color: #0f172a !important;
+            border: 1px solid #334155 !important;
             border-radius: 6px !important;
             padding: 1.1rem !important;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
             font-size: 0.9rem !important;
             line-height: 1.55 !important;
-            color: var(--text-color, #1e293b) !important;
+            color: #f1f5f9 !important;
             white-space: pre-wrap !important;
         }
         .extracted-text-viewer * {
@@ -320,24 +302,24 @@ def apply_custom_styles() -> None:
             display: inline-block !important;
         }
         .provenance-user {
-            background-color: rgba(14, 165, 233, 0.18) !important;
-            color: #0284c7 !important;
-            border: 1px solid rgba(14, 165, 233, 0.35) !important;
+            background-color: rgba(14, 165, 233, 0.2) !important;
+            color: #38bdf8 !important;
+            border: 1px solid rgba(14, 165, 233, 0.4) !important;
         }
         .provenance-doc {
-            background-color: rgba(168, 85, 247, 0.18) !important;
-            color: #9333ea !important;
-            border: 1px solid rgba(168, 85, 247, 0.35) !important;
+            background-color: rgba(168, 85, 247, 0.2) !important;
+            color: #c084fc !important;
+            border: 1px solid rgba(168, 85, 247, 0.4) !important;
         }
         .provenance-derived {
-            background-color: rgba(245, 158, 11, 0.18) !important;
-            color: #d97706 !important;
-            border: 1px solid rgba(245, 158, 11, 0.35) !important;
+            background-color: rgba(245, 158, 11, 0.2) !important;
+            color: #fbbf24 !important;
+            border: 1px solid rgba(245, 158, 11, 0.4) !important;
         }
         .fixture-tag {
-            background-color: rgba(239, 68, 68, 0.12) !important;
+            background-color: rgba(239, 68, 68, 0.15) !important;
             border: 1px dashed #ef4444 !important;
-            color: #dc2626 !important;
+            color: #fca5a5 !important;
             padding: 0.65rem 0.9rem !important;
             border-radius: 6px !important;
             font-size: 0.85rem !important;
@@ -345,15 +327,7 @@ def apply_custom_styles() -> None:
             margin-bottom: 1rem !important;
         }
         .fixture-tag strong {
-            color: #b91c1c !important;
-        }
-
-        /* Streamlit Default Code & Inline Text Overrides */
-        code {
-            background-color: rgba(148, 163, 184, 0.2) !important;
-            color: var(--text-color, #0f172a) !important;
-            padding: 0.15rem 0.35rem !important;
-            border-radius: 4px !important;
+            color: #fecaca !important;
         }
         </style>
         """,

@@ -234,20 +234,20 @@ def render_workspace_view(
                 <div class="hospital-box">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div>
-                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #7e22ce; border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 4px; padding: 2px 6px; font-size: 0.72rem; font-weight: 700;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 4px; padding: 2px 6px; font-size: 0.72rem; font-weight: 700;">SYNTHETIC DEMONSTRATION DATA</span>
                             <h4>{rec.hospital_name}</h4>
                             <span style="font-size: 0.88rem;">
                                 City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Dataset Version: <strong>{rec.dataset_version}</strong> ({rec.dataset_date.strftime('%d %b %Y')})
                             </span>
                         </div>
                         <div style="text-align: right;">
-                            <span style="background-color: rgba(14, 165, 233, 0.2); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.4); border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">{rec.network_tier.replace('_', ' ')}</span>
+                            <span style="background-color: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">{rec.network_tier.replace('_', ' ')}</span>
                             <div style="font-size: 0.82rem; margin-top: 0.35rem;">
                                 TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
                             </div>
                         </div>
                     </div>
-                    <div style="margin-top: 0.65rem; font-size: 0.82rem; color: #7c3aed; background-color: rgba(139, 92, 246, 0.12); padding: 0.5rem 0.85rem; border-radius: 4px; line-height: 1.45;">
+                    <div style="margin-top: 0.65rem; font-size: 0.82rem; color: #d8b4fe; background-color: rgba(139, 92, 246, 0.15); padding: 0.5rem 0.85rem; border-radius: 4px; line-height: 1.45;">
                         ⚠️ <strong>Invariant & Limitations:</strong> Synthetic hospital directory match does NOT verify live insurer network status, cashless eligibility, or claim approval. Cashless agreements must be verified directly with the hospital admission desk and insurance TPA.
                     </div>
                 </div>
@@ -415,7 +415,7 @@ def render_workspace_view(
                                         <span style="font-size: 0.9rem;"><strong>Why it matters:</strong> {item.why_it_matters}</span><br>
                                         <span style="font-size: 0.85rem;"><strong>Suggested Source:</strong> {item.suggested_source or 'Insurer / TPA'}</span>
                                     </div>
-                                    <span style="font-size: 0.8rem; font-weight: 700; padding: 0.25rem 0.55rem; border-radius: 4px; background: {'rgba(34, 197, 94, 0.2); color: #15803d' if item.status == 'provided_pending_review' else 'rgba(245, 158, 11, 0.2); color: #b45309' if item.status == 'requested' else 'rgba(100, 116, 139, 0.2); color: #475569'};">
+                                    <span style="font-size: 0.8rem; font-weight: 700; padding: 0.25rem 0.55rem; border-radius: 4px; background: {'rgba(34, 197, 94, 0.25); color: #4ade80' if item.status == 'provided_pending_review' else 'rgba(245, 158, 11, 0.25); color: #fbbf24' if item.status == 'requested' else 'rgba(100, 116, 139, 0.3); color: #cbd5e1'};">
                                         {item.status.upper().replace('_', ' ')}
                                     </span>
                                 </div>
@@ -1294,7 +1294,7 @@ def render_workspace_view(
                     st.markdown(
                         f"""
                         <div class="hospital-box">
-                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #7e22ce; font-weight: 700; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight: 700; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">SYNTHETIC DEMONSTRATION DATA</span>
                             <h4>{rec.hospital_name}</h4>
                             <div style="font-size: 0.85rem;">
                                 City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Tier: <strong>{rec.network_tier.upper().replace('_', ' ')}</strong> &bull; TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
@@ -1302,7 +1302,7 @@ def render_workspace_view(
                             <div style="font-size: 0.8rem; margin-top: 0.35rem;">
                                 Dataset Version: <strong>{rec.dataset_version}</strong> &bull; Date: {rec.dataset_date.strftime('%d %b %Y')}
                             </div>
-                            <div style="font-size: 0.8rem; color: #7c3aed; background-color: rgba(139, 92, 246, 0.12); padding: 0.45rem 0.65rem; border-radius: 4px; margin-top: 0.5rem;">
+                            <div style="font-size: 0.8rem; color: #d8b4fe; background-color: rgba(139, 92, 246, 0.15); padding: 0.45rem 0.65rem; border-radius: 4px; margin-top: 0.5rem;">
                                 ⚠️ <strong>Notice:</strong> Synthetic hospital directory match does NOT verify live insurer network agreement, cashless eligibility, or claim approval.
                             </div>
                         </div>
@@ -1338,7 +1338,7 @@ def render_workspace_view(
                                 <span style="font-weight: 700; font-size: 0.75rem; color: {f_color} !important; text-transform: uppercase;">{f.status}</span>
                             </div>
                             <p style="margin: 0.4rem 0 0.4rem 0; font-size: 0.92rem;">{f.conclusion}</p>
-                            <div style="font-size: 0.85rem; color: #166534; background: rgba(34, 197, 94, 0.12); padding: 0.45rem 0.65rem; border-radius: 4px;">
+                            <div style="font-size: 0.85rem; color: #4ade80; background: rgba(34, 197, 94, 0.15); padding: 0.45rem 0.65rem; border-radius: 4px;">
                                 <strong>Next Action:</strong> {f.next_action}
                             </div>
                         </div>
