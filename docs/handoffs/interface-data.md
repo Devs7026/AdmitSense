@@ -1,7 +1,7 @@
-Updated: 2026-10-24T11:25:00+05:30
+Updated: 2026-10-24T11:28:00+05:30
 Owner / task: OWNER A / M1-A
-Branch / implementation commit or PR: dhruv (local working tree)
-Delivery state: local
+Branch / implementation commit or PR: main (commit 2a27074)
+Delivery state: merged
 Implemented:
 - Completed virtual environment (.venv) creation and installed all dependencies from requirements.txt (streamlit, groq, pypdf, pydantic, python-dotenv, pytest).
 - Built SQLite storage layer in src/admitsense/storage/:
