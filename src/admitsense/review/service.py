@@ -33,9 +33,11 @@ class FixtureReviewRunner:
         case: CaseDetails,
         retrieval: SqliteEvidenceRetrieval,
         prior_packet: ReviewPacket | None = None,
+        user_answers: dict[str, Any] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
         event_callback: Callable[[dict], None] | None = None,
+        **kwargs: Any,
     ) -> ReviewPacket:
         run_id = f"run-{uuid.uuid4().hex[:8]}"
         packet_version = (prior_packet.packet_version + 1) if prior_packet else 1
@@ -250,7 +252,14 @@ class ReviewService:
             except ImportError:
                 self.runner = FixtureReviewRunner()
 
-    def execute_review(self, case_id: str) -> ReviewPacket:
+    def execute_review(
+        self,
+        case_id: str,
+        user_answers: dict[str, Any] | None = None,
+        tool_budget: int = 8,
+        timeout_seconds: float = 30.0,
+        event_callback: Callable[[Any], None] | None = None,
+    ) -> ReviewPacket:
         """Loads case facts, runs review analysis, and persists the resulting packet snapshot."""
         case = self.case_repo.get_case(case_id)
         if not case:
@@ -263,8 +272,29 @@ class ReviewService:
             case=case,
             retrieval=self.retrieval,
             prior_packet=prior_packet,
+            user_answers=user_answers,
+            tool_budget=tool_budget,
+            timeout_seconds=timeout_seconds,
+            event_callback=event_callback,
         )
 
         # Persist snapshot atomically
         saved_packet = self.review_repo.save_review_packet(packet)
         return saved_packet
+
+    def resume_review(
+        self,
+        case_id: str,
+        user_answers: dict[str, Any] | None = None,
+        tool_budget: int = 8,
+        timeout_seconds: float = 30.0,
+        event_callback: Callable[[Any], None] | None = None,
+    ) -> ReviewPacket:
+        """Explicit resumption of an existing review using user answers / saved facts."""
+        return self.execute_review(
+            case_id=case_id,
+            user_answers=user_answers,
+            tool_budget=tool_budget,
+            timeout_seconds=timeout_seconds,
+            event_callback=event_callback,
+        )
