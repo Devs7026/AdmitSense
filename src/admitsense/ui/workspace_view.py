@@ -79,6 +79,7 @@ def render_workspace_view(
 
     # Fetch latest persisted ReviewPacket from SQLite for this case
     persisted_packet = r_repo.get_latest_review_packet(case.case_id)
+    documents = storage.list_documents(case.case_id)
 
     # Top Navigation Row
     top_c1, top_c2, top_c3, top_c4 = st.columns([2, 4, 2, 2])
