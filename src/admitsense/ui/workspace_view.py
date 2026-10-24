@@ -14,20 +14,20 @@ from admitsense.documents.synthetic import (
     build_synthetic_schedule_pdf,
     build_synthetic_unreadable_pdf,
 )
+from admitsense.review.service import ReviewService
 from admitsense.schemas import CaseDetails, Evidence, ReviewPacket
 from admitsense.storage.case_repository import CaseRepository
+from admitsense.storage.review_repository import ReviewRepository
 from admitsense.ui.components import render_authorization_badge
 
 
 def _load_sample_packet_fixture(scenario: str = "supported_finding") -> ReviewPacket | None:
-    # First attempt to load from Owner B's test fixtures module
     try:
         from tests.fixtures import get_sample_packet
         return get_sample_packet(scenario)
     except Exception:
         pass
 
-    # Fallback to tests/fixtures/sample_packet.json
     fixture_path = Path("tests") / "fixtures" / "sample_packet.json"
     if fixture_path.exists():
         try:
@@ -43,6 +43,8 @@ def render_workspace_view(
     repo: CaseRepository,
     doc_storage: DocumentStorage | None = None,
     retrieval: SqliteEvidenceRetrieval | None = None,
+    review_repo: ReviewRepository | None = None,
+    review_service: ReviewService | None = None,
 ) -> None:
     case_id = st.session_state.get("current_case_id")
     if not case_id:
@@ -62,9 +64,13 @@ def render_workspace_view(
 
     storage = doc_storage or DocumentStorage(db=repo.db)
     ev_retrieval = retrieval or SqliteEvidenceRetrieval(db=repo.db)
+    r_repo = review_repo or ReviewRepository(db=repo.db)
+    r_service = review_service or ReviewService(
+        case_repo=repo, review_repo=r_repo, retrieval=ev_retrieval
+    )
 
     # Top Navigation Row
-    top_c1, top_c2, top_c3 = st.columns([2, 5, 2])
+    top_c1, top_c2, top_c3, top_c4 = st.columns([2, 4, 2, 2])
     with top_c1:
         if st.button("⬅️ Back to Cases", use_container_width=True):
             st.session_state.current_view = "home"
@@ -79,19 +85,41 @@ def render_workspace_view(
         if st.button("✏️ Edit Case Facts", use_container_width=True):
             st.session_state.current_view = "setup"
             st.rerun()
+    with top_c4:
+        # Review available documents action trigger
+        if st.button(
+            "🔍 Review Available Documents",
+            type="primary",
+            use_container_width=True,
+            help="Trigger automated policy review on ingested documents and case facts",
+        ):
+            with st.spinner("Analyzing case facts and policy documents..."):
+                try:
+                    packet = r_service.execute_review(case.case_id)
+                    st.toast(f"Review completed: {packet.review_status.upper()}", icon="✅")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Review execution failed: {e}")
 
     st.markdown("---")
 
-    # Authorisation Status Banner (Non-negotiable invariant: defaults to unverified)
-    render_authorization_badge(status="not verified")
+    # Fetch latest persisted ReviewPacket from SQLite for this case
+    persisted_packet = r_repo.get_latest_review_packet(case.case_id)
+
+    # Authorisation Status Banner (Non-negotiable invariant: strictly separate, defaults to unverified)
+    auth_status = persisted_packet.authorization_status if persisted_packet else "not verified"
+    render_authorization_badge(status=auth_status)
 
     # Next Action Banner
-    sample_packet = _load_sample_packet_fixture()
-    next_action_text = (
-        sample_packet.findings[0].next_action
-        if (sample_packet and sample_packet.findings)
-        else "Upload policy schedule or hospital estimate to initiate automated review."
-    )
+    if persisted_packet and persisted_packet.findings:
+        next_action_text = persisted_packet.findings[0].next_action
+    else:
+        sample_packet_for_next = _load_sample_packet_fixture()
+        next_action_text = (
+            sample_packet_for_next.findings[0].next_action
+            if (sample_packet_for_next and sample_packet_for_next.findings)
+            else "Upload policy schedule or hospital estimate to initiate automated review."
+        )
 
     st.markdown(
         f"""
@@ -103,17 +131,17 @@ def render_workspace_view(
         unsafe_allow_html=True,
     )
 
-    # Main Workspace Tabs
-    tab_facts, tab_review, tab_docs, tab_replay, tab_export = st.tabs(
-        [
-            "📋 Case Facts & Provenance",
-            "🔍 Findings & Review",
-            "📄 Documents & Evidence Viewer",
-            "🔄 Change Replay (M5)",
-            "📥 Packet Export (M6)",
-        ]
-    )
+    # Tab selection state
+    tab_titles = [
+        "📋 Case Facts & Provenance",
+        "🔍 Findings & Review",
+        "📄 Documents & Evidence Viewer",
+        "🔄 Change Replay (M5)",
+        "📥 Packet Export (M6)",
+    ]
+    tab_facts, tab_review, tab_docs, tab_replay, tab_export = st.tabs(tab_titles)
 
+    # 1. Case Facts & Provenance
     with tab_facts:
         st.subheader("Supplied Case Facts")
         st.caption("Facts without user input remain explicitly `None` (Unknown).")
@@ -168,64 +196,90 @@ def render_workspace_view(
                         )
                 st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
 
+    # 2. Findings & Review
     with tab_review:
-        f_col1, f_col2 = st.columns([2, 1])
-        with f_col1:
-            st.subheader("Review Findings (Development Fixture)")
-        with f_col2:
-            scenario_choice = st.selectbox(
-                "Sample Fixture Scenario:",
-                ["supported_finding", "incomplete_review", "conflict_review", "revised_finding"],
-                index=0,
-            )
-
-        active_packet = _load_sample_packet_fixture(scenario=scenario_choice)
-        if active_packet:
+        if persisted_packet:
+            # Render persisted review packet from SQLite
+            status_color = "#16a34a" if persisted_packet.review_status == "complete" else "#ea580c"
             st.markdown(
-                """
-                <div class="fixture-tag">
-                    ⚠️ <strong>DEVELOPMENT FIXTURE — Sample Review Packet (Owner B Dependency)</strong><br>
-                    This is a development mock fixture demonstrating the workspace review UI layout.
-                    It does not represent real review execution.
+                f"""
+                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 700; font-size: 1.1rem; color: #1e293b;">
+                            Persisted Review Packet: <code>{persisted_packet.packet_id}</code> (v{persisted_packet.packet_version})
+                        </span>
+                        <span style="background-color: {status_color}; color: white; padding: 0.25rem 0.65rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">
+                            {persisted_packet.review_status}
+                        </span>
+                    </div>
+                    <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.85rem; color: #64748b;">
+                        <span>Run ID: <code>{persisted_packet.run_id}</code></span>
+                        <span>Tool Steps Used: <strong>{persisted_packet.tool_steps_used} / 8</strong></span>
+                        <span>Stop Reason: <strong>{persisted_reason_label(persisted_packet.stopped_reason)}</strong></span>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                st.metric("Packet ID", active_packet.packet_id)
-            with r2:
-                st.metric("Review Status", active_packet.review_status.upper())
-            with r3:
-                st.metric("Tool Steps Used", f"{active_packet.tool_steps_used} / 8")
+            if persisted_packet.stop_details:
+                st.caption(f"ℹ️ {persisted_packet.stop_details}")
 
             st.markdown("### Findings")
-            for finding in active_packet.findings:
-                status_color = "#ea580c" if finding.status == "unresolved" else "#16a34a"
-                with st.expander(f"{finding.topic} — {finding.status.upper()}", expanded=True):
+            for finding in persisted_packet.findings:
+                status_badge = {
+                    "supported": ("#16a34a", "SUPPORTED"),
+                    "unresolved": ("#ea580c", "UNRESOLVED"),
+                    "conflict": ("#dc2626", "CONFLICT"),
+                    "needs_human_review": ("#7c3aed", "NEEDS HUMAN REVIEW"),
+                }.get(finding.status, ("#64748b", finding.status.upper()))
+
+                with st.expander(
+                    f"{finding.topic} — {status_badge[1]} (Rev {finding.revision})",
+                    expanded=True,
+                ):
                     st.markdown(f"**Conclusion:** {finding.conclusion}")
+
+                    # Citation Links with navigation to Evidence Viewer
                     if finding.evidence:
                         st.markdown("**Cited Evidence:**")
-                        for ev in finding.evidence:
-                            st.markdown(
-                                f"""
-                                <div style="background-color: #f8fafc; border-left: 3px solid #64748b; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.88rem;">
-                                    <em>"{ev.quote}"</em><br>
-                                    <span style="color: #64748b; font-size: 0.8rem;">
-                                        Document: <code>{ev.document_id}</code> ({ev.document_version}) &bull; Physical Page: <strong>{ev.page}</strong>
-                                    </span>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
+                        for idx, ev in enumerate(finding.evidence):
+                            c_col1, c_col2 = st.columns([4, 1])
+                            with c_col1:
+                                st.markdown(
+                                    f"""
+                                    <div style="background-color: #f8fafc; border-left: 3px solid #64748b; padding: 0.5rem 0.75rem; font-size: 0.88rem;">
+                                        <em>"{ev.quote}"</em><br>
+                                        <span style="color: #64748b; font-size: 0.8rem;">
+                                            Document: <code>{ev.document_id}</code> ({ev.document_version}) &bull; Physical Page: <strong>{ev.page}</strong>
+                                        </span>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                            with c_col2:
+                                if st.button(
+                                    f"🔗 View Page {ev.page}",
+                                    key=f"cite_btn_{finding.finding_id}_{idx}",
+                                    help="Jump to exact physical page in Evidence Viewer",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.inspect_doc_id = ev.document_id
+                                    st.session_state.inspect_version = ev.document_version
+                                    st.session_state.inspect_page = ev.page
+                                    st.session_state.inspect_quote = ev.quote
+                                    st.info(f"Navigate to 'Documents & Evidence Viewer' tab to view Page {ev.page}.")
+
+                    if finding.missing_facts:
+                        st.markdown(f"**Missing Facts:** {', '.join(finding.missing_facts)}")
                     if finding.limitations:
                         st.markdown(f"**Limitations:** {', '.join(finding.limitations)}")
                     st.markdown(f"**Next Action:** {finding.next_action}")
 
-            if active_packet.missing_evidence_checklist:
+            # Missing-Evidence Checklist
+            if persisted_packet.missing_evidence_checklist:
                 st.markdown("### Missing-Evidence Checklist")
-                for item in active_packet.missing_evidence_checklist:
+                for item in persisted_packet.missing_evidence_checklist:
                     st.markdown(
                         f"""
                         <div class="fact-card">
@@ -236,16 +290,49 @@ def render_workspace_view(
                         """,
                         unsafe_allow_html=True,
                     )
+
+            if persisted_packet.unresolved_questions:
+                st.markdown("### Unresolved Questions for Hospital Desk / Insurer")
+                for q in persisted_packet.unresolved_questions:
+                    st.markdown(f"- ❓ {q}")
+
         else:
+            # No review packet run yet for this case: offer scenario preview or trigger action
             st.info(
-                "ℹ️ **Review Engine Pending**: Owner B's review engine, retrieval tools, and findings "
-                "generation will be integrated in Milestone M3."
+                "ℹ️ No review has been executed yet for this case. Click **🔍 Review Documents** "
+                "above to analyze case facts and uploaded documents."
             )
 
+            st.markdown("---")
+            st.markdown("#### Preview Development Fixture Scenarios (Owner B Mock Data):")
+            scenario_choice = st.selectbox(
+                "Select Fixture Scenario to Preview:",
+                ["supported_finding", "incomplete_review", "conflict_review", "revised_finding"],
+                index=0,
+            )
+            sample_packet = _load_sample_packet_fixture(scenario=scenario_choice)
+            if sample_packet:
+                st.markdown(
+                    """
+                    <div class="fixture-tag">
+                        ⚠️ <strong>DEVELOPMENT FIXTURE — Simulated Review Packet (Owner B Dependency)</strong><br>
+                        This is mock fixture output used to test layout and contracts. It does not represent live review execution.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                for finding in sample_packet.findings:
+                    with st.expander(f"{finding.topic} — {finding.status.upper()}", expanded=True):
+                        st.markdown(f"**Conclusion:** {finding.conclusion}")
+                        if finding.evidence:
+                            st.markdown(f"**Cited Evidence:** *\"{finding.evidence[0].quote}\"* (Page {finding.evidence[0].page})")
+                        st.markdown(f"**Next Action:** {finding.next_action}")
+
+    # 3. Documents & Evidence Viewer
     with tab_docs:
         st.subheader("Document Ingestion & Immutable Version History")
 
-        # 1. Document Upload Section
+        # Upload Container
         with st.expander("📤 Upload New PDF Document", expanded=True):
             up_col1, up_col2 = st.columns([3, 2])
             with up_col1:
@@ -331,7 +418,7 @@ def render_workspace_view(
                     st.toast(f"Unreadable PDF loaded as {rec.version}")
                     st.rerun()
 
-        # 2. Documents List
+        # Documents List
         docs = storage.list_documents(case.case_id)
         if not docs:
             st.info("No documents uploaded yet for this case. Upload a PDF or load a synthetic fixture above.")
@@ -366,12 +453,28 @@ def render_workspace_view(
                         st.caption(f"Uploaded: {doc.uploaded_at[:19]}")
                     st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
 
-            # 3. Interactive Evidence Viewer
+            # Interactive Evidence Viewer
             st.markdown("---")
             st.subheader("🔍 Physical Page Evidence Viewer")
 
             doc_options = {f"{d.filename} ({d.version})": (d.document_id, d.version) for d in docs}
-            selected_label = st.selectbox("Select Document & Version to Inspect:", list(doc_options.keys()))
+            doc_labels = list(doc_options.keys())
+
+            # Support jump from citation link in findings
+            default_doc_idx = 0
+            inspect_doc = st.session_state.get("inspect_doc_id")
+            inspect_ver = st.session_state.get("inspect_version")
+            if inspect_doc and inspect_ver:
+                for idx, (lbl, (d_id, d_v)) in enumerate(doc_options.items()):
+                    if d_id == inspect_doc and d_v == inspect_ver:
+                        default_doc_idx = idx
+                        break
+
+            selected_label = st.selectbox(
+                "Select Document & Version to Inspect:",
+                doc_labels,
+                index=default_doc_idx,
+            )
 
             if selected_label:
                 sel_doc_id, sel_ver = doc_options[selected_label]
@@ -379,11 +482,16 @@ def render_workspace_view(
 
                 if full_doc and full_doc.pages:
                     total_p = full_doc.total_pages
+
+                    default_page = 14 if total_p >= 14 else 1
+                    if "inspect_page" in st.session_state and st.session_state.inspect_page <= total_p:
+                        default_page = st.session_state.inspect_page
+
                     sel_page_num = st.number_input(
                         f"Select Physical Page Number (1 to {total_p}):",
                         min_value=1,
                         max_value=total_p,
-                        value=14 if total_p >= 14 else 1,
+                        value=default_page,
                         step=1,
                     )
 
@@ -400,10 +508,24 @@ def render_workspace_view(
                                 f"**Extracted Text from Physical Page {page_obj.page_number}** "
                                 f"({page_obj.character_count} characters):"
                             )
+
+                            quote_to_highlight = st.session_state.get("inspect_quote")
+                            rendered_text = page_obj.text
+                            if quote_to_highlight and quote_to_highlight.lower() in page_obj.text.lower():
+                                # Highlight quote in yellow
+                                start_idx = page_obj.text.lower().find(quote_to_highlight.lower())
+                                end_idx = start_idx + len(quote_to_highlight)
+                                exact_match = page_obj.text[start_idx:end_idx]
+                                rendered_text = (
+                                    page_obj.text[:start_idx]
+                                    + f"<mark style='background-color: #fef08a; padding: 0.1rem 0.3rem;'>{exact_match}</mark>"
+                                    + page_obj.text[end_idx:]
+                                )
+
                             st.markdown(
                                 f"""
                                 <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.9rem; line-height: 1.5; color: #1e293b;">
-                                    {page_obj.text}
+                                    {rendered_text}
                                 </div>
                                 """,
                                 unsafe_allow_html=True,
@@ -411,9 +533,13 @@ def render_workspace_view(
 
                             # Citation Verifier Tool
                             with st.expander("🔬 Test Citation on this Page"):
+                                default_test_q = (
+                                    st.session_state.get("inspect_quote")
+                                    or ("twenty-four (24) continuous months" if page_obj.page_number == 14 else "")
+                                )
                                 test_quote = st.text_area(
                                     "Enter quote to verify against this physical page:",
-                                    value="twenty-four (24) continuous months" if page_obj.page_number == 14 else "",
+                                    value=default_test_q,
                                 )
                                 if st.button("Verify Citation ➔"):
                                     test_ev = Evidence(
@@ -440,3 +566,16 @@ def render_workspace_view(
             "ℹ️ **Packet Export (Milestone M6)**: Deterministic, self-contained HTML export rendering "
             "the exact saved review snapshot will be integrated in M6."
         )
+
+
+def persisted_reason_label(reason: str) -> str:
+    labels = {
+        "review_complete": "Review Complete",
+        "missing_information": "Missing Information",
+        "conflicting_evidence": "Conflicting Evidence",
+        "needs_human_review": "Needs Human Review",
+        "tool_limit_reached": "Tool Limit Reached (Max 8)",
+        "timeout": "Timeout",
+        "processing_error": "Processing Error",
+    }
+    return labels.get(reason, reason)

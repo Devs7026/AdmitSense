@@ -96,5 +96,79 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_pages_doc ON document_pages(document_id, version);
                 CREATE INDEX IF NOT EXISTS idx_pages_case ON document_pages(case_id);
+
+                CREATE TABLE IF NOT EXISTS review_packets (
+                    packet_id TEXT PRIMARY KEY,
+                    case_id TEXT NOT NULL,
+                    packet_version INTEGER NOT NULL DEFAULT 1,
+                    run_id TEXT NOT NULL,
+                    review_status TEXT NOT NULL,
+                    tool_steps_used INTEGER NOT NULL DEFAULT 0,
+                    stopped_reason TEXT NOT NULL,
+                    stop_details TEXT,
+                    authorization_status TEXT NOT NULL DEFAULT 'not verified',
+                    packet_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_packets_case ON review_packets(case_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS findings (
+                    finding_id TEXT NOT NULL,
+                    packet_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    topic TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    conclusion TEXT NOT NULL,
+                    next_action TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
+                    relevant_case_facts_json TEXT NOT NULL DEFAULT '[]',
+                    missing_facts_json TEXT NOT NULL DEFAULT '[]',
+                    limitations_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (finding_id, packet_id),
+                    FOREIGN KEY (packet_id) REFERENCES review_packets(packet_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_findings_case ON findings(case_id);
+
+                CREATE TABLE IF NOT EXISTS revisions (
+                    revision_id TEXT NOT NULL,
+                    packet_id TEXT NOT NULL,
+                    finding_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    old_finding_revision INTEGER NOT NULL,
+                    new_finding_revision INTEGER NOT NULL,
+                    old_conclusion TEXT NOT NULL,
+                    new_conclusion TEXT NOT NULL,
+                    old_status TEXT NOT NULL,
+                    new_status TEXT NOT NULL,
+                    trigger_type TEXT NOT NULL,
+                    triggering_evidence_json TEXT NOT NULL DEFAULT '[]',
+                    changed_case_facts_json TEXT NOT NULL DEFAULT '[]',
+                    reason TEXT NOT NULL,
+                    affected_topics_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (revision_id, packet_id),
+                    FOREIGN KEY (packet_id) REFERENCES review_packets(packet_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_revisions_finding ON revisions(case_id, finding_id);
+
+                CREATE TABLE IF NOT EXISTS checklist_items (
+                    item_id TEXT NOT NULL,
+                    packet_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    related_finding_ids_json TEXT NOT NULL DEFAULT '[]',
+                    requested_information TEXT NOT NULL,
+                    why_it_matters TEXT NOT NULL,
+                    suggested_source TEXT,
+                    status TEXT NOT NULL DEFAULT 'requested',
+                    resolution_note TEXT,
+                    PRIMARY KEY (item_id, packet_id),
+                    FOREIGN KEY (packet_id) REFERENCES review_packets(packet_id) ON DELETE CASCADE
+                );
                 """
             )
