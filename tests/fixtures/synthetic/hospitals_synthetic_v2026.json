@@ -1,0 +1,46 @@
+{
+  "dataset_version": "v2026.1",
+  "dataset_date": "2026-10-01",
+  "disclaimer": "SYNTHETIC DEMONSTRATION DATASET. Not indicative of real network agreements or claim approval.",
+  "hospitals": [
+    {
+      "record_id": "hosp-synth-001",
+      "dataset_version": "v2026.1",
+      "dataset_date": "2026-10-01",
+      "hospital_name": "Apex Super Specialty Hospital",
+      "city": "Bengaluru",
+      "network_tier": "tier_1",
+      "tpa_desk_contact": "+91-80-5555-0199 (Ext 402)",
+      "limitations": [
+        "Synthetic hospital data for demonstration only.",
+        "Does not establish current insurer network agreement or cashless guarantee."
+      ]
+    },
+    {
+      "record_id": "hosp-synth-002",
+      "dataset_version": "v2026.1",
+      "dataset_date": "2026-10-01",
+      "hospital_name": "City General Hospital",
+      "city": "Bengaluru",
+      "network_tier": "tier_2",
+      "tpa_desk_contact": "+91-80-5555-0144",
+      "limitations": [
+        "Synthetic hospital data for demonstration only.",
+        "Does not establish current insurer network agreement or cashless guarantee."
+      ]
+    },
+    {
+      "record_id": "hosp-synth-003",
+      "dataset_version": "v2026.1",
+      "dataset_date": "2026-10-01",
+      "hospital_name": "Lotus Healthcare Clinic",
+      "city": "Bengaluru",
+      "network_tier": "non_network",
+      "tpa_desk_contact": null,
+      "limitations": [
+        "Synthetic hospital data for demonstration only.",
+        "Does not establish current insurer network agreement or cashless guarantee."
+      ]
+    }
+  ]
+}
