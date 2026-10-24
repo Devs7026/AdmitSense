@@ -1,64 +1,85 @@
-Updated: 2026-10-24T14:31:00+05:30
-Owner / task: OWNER A / M5-A & Interface/Storage side of M5-I (Evidence Change Replay & Immutable Snapshots)
-Branch / implementation commit or PR: main (merge commit d1e7347)
-Delivery state: integrated
+Updated: 2026-10-24T15:35:00+05:30
+Owner / task: OWNER A / M6-A & Interface/Export side of M6-I (Hospital Reference Display & Deterministic HTML Packet Export)
+Branch / implementation commit or PR: feat/m6-hospital-and-packet-export
+Delivery state: ready for review (awaiting teammate review and merge authorisation)
 Implemented:
-1. Replay Delta Computation (`src/admitsense/review/replay.py`):
-   - Implemented `compute_evidence_replay(prior_packet, new_findings, trigger_type, triggering_evidence, changed_case_facts, reason)` matching agreed CONTRACTS.md Section 3.5.
-   - Categorizes findings into three clear sets:
-     - Changed findings: increments `Finding.revision` by exactly 1 (`old_revision + 1`) and creates a traceable `Revision` audit record.
-     - Unchanged findings: retains `Finding.revision` at `old_revision` and emits 0 new revisions.
-     - Newly introduced findings: starts at `Finding.revision = 1` with 0 prior revisions.
-   - Enforces trigger integrity: `trigger_type="new_document"` requires non-empty `triggering_evidence`; `trigger_type in {"user_correction", "case_details_changed"}` requires `changed_case_facts`.
-2. Atomic Storage & Historical Finding Snapshots (`src/admitsense/storage/review_repository.py`):
-   - `save_review_packet(packet, expected_prior_packet_version=None)`:
-     - Atomically commits `review_packets`, `findings`, `revisions`, and `checklist_items` in a single SQLite transaction.
-     - Stale review protection: checks `expected_prior_packet_version` against current database state. If newer reviews were committed concurrently, raises `StaleReviewError` and rolls back without mutating.
-     - Failed saves rollback completely, leaving previous review intact.
-   - `get_finding_snapshot(case_id, finding_id, revision)`: retrieves the exact historical finding record and citations as it existed at a past revision.
-   - `get_finding_history(case_id, finding_id)` and `list_all_revisions(case_id)`: retrieves chronological audit trails grouped by `revision_id` to prevent duplicate carried-forward logs.
-3. Review Service Integration (`src/admitsense/review/service.py`):
-   - Tracks `expected_prior_version` before analysis and validates it upon save.
-   - Enhanced `FixtureReviewRunner` to demonstrate M5 replay progression: amends waiting period finding from 24 to 12 months when `Joint_Replacement_Endorsement.pdf` is uploaded, recording triggering endorsement evidence on p.1, while duplicate runs without new evidence emit 0 duplicate revisions.
-4. Evidence Change Replay Interface (`src/admitsense/ui/workspace_view.py`):
-   - Built full `tab_replay` ("🔄 Evidence Change Replay"):
-     - Packet version selector to inspect past review revisions.
-     - Changed Findings: two-column before-and-after cards displaying Previous Assessment (Rev X) vs Updated Assessment (Rev X+1), reason for change, triggering evidence citations, and updated next action.
-     - Previous Evidence Viewer: collapsible drawer showing older citations with clickable buttons jumping to earlier document versions/pages in the Evidence Viewer.
-     - Unchanged Findings section: clearly groups findings that remained unaltered by the latest evidence.
-     - Newly Introduced Findings section: highlights findings introduced for the first time.
-     - Current checklist and updated next action banner preserved.
-     - Separate insurer authorisation banner strictly maintained defaulting to `"not verified"`.
-     - Supports live review packets as well as development fixture preview (`revised_finding` scenario).
+1. Hospital Information Display (`src/admitsense/documents/hospital_directory.py` & UI):
+   - Created `LocalSyntheticHospitalDirectory` implementing `HospitalLookupService` protocol conforming to CONTRACTS.md Section 2.6 and Section 3.4.
+   - Evaluates hospital facilities against dated synthetic demonstration records (`v2026.1`, `2026-10-01`).
+   - Supports all 4 required matching states:
+     - `matched`: Displays facility name, city, network tier (`tier_1`, `tier_2`, `non_network`), TPA contact, record ID, dataset version, and date.
+     - `no_match`: Displays clear notice when a facility is not in the synthetic dataset.
+     - `ambiguous_match`: Identifies multiple candidate facilities matching the query and prompts for exact name.
+     - `missing_information`: Explains that hospital facility has not been entered in case details.
+   - Non-Authorisation Invariant strictly enforced: Prominently displays notice that directory match does NOT verify live insurer network status, cashless eligibility, or claim approval.
+   - Integrated into both `tab_facts` and `tab_export` in the Streamlit workspace view.
+
+2. Review Packet Preview (`src/admitsense/ui/workspace_view.py`):
+   - Implemented full `tab_export` ("📥 Review Packet Preview & Deterministic Export"):
+     - Snapshot Version Selector: Allows caregivers to select which historical packet version (`v1`, `v2`, etc.) to inspect and export from SQLite storage.
+     - Metadata Header: Packet ID, Version, Run ID, Generation Time, and Review Status badge.
+     - Mandatory Authorisation Banner: Strictly defaults to `"not verified"` with domain boundary explanation.
+     - Incomplete Review Warning: Prominently highlights partial execution stop reasons, stop details, and limitations.
+     - Case & Admission Summary: Patient, policy ID, procedure, planned admission date, coverage start, estimated cost.
+     - Synthetic Hospital Display: Live directory card showing status, tier, contact, and disclaimers.
+     - Documents Reviewed: Table of reviewed files, versions, and extraction statuses.
+     - Administrative Findings: Topic cards with revision badges, status, conclusion, next action, and exact blockquote physical page citations.
+     - Missing Evidence Checklist: Table of requested items, rationale, suggested sources, and resolution statuses.
+     - Questions for Hospital Admission Desk & Insurer: Concrete actionable questions list for desk staff and TPA.
+     - Revision Audit Trail: Full chronological history of finding revisions, trigger types, and triggering evidence quotes.
+
+3. Deterministic HTML Packet Download (`src/admitsense/export/html_exporter.py`):
+   - Implemented pure function `generate_review_packet_html`:
+     - Renders a standalone, self-contained HTML5 document directly from a saved `ReviewPacket` snapshot.
+     - Deterministic export: ZERO live model calls, reassessments, or database writes during generation.
+     - Security: Complete HTML escaping (`html.escape`) of all dynamic user, document, model, and hospital strings (safe against script injection / XSS).
+     - Export Safety: No secrets, machine paths (`C:\Users\`, `/tmp/`), or local `file:///` URLs.
+     - Modern Styling: Clean typography, status color badges, responsive layout, and dedicated `@media print` stylesheet for clean printing / PDF saving.
+     - Download Button: `st.download_button` generating `review_packet_{case_id}_v{packet_version}.html`. Preview and download strictly represent the exact same packet version.
+
 Interfaces changed:
-- Added module `src/admitsense/review/replay.py` exporting `compute_evidence_replay`.
-- Exported `compute_evidence_replay` in `src/admitsense/review/__init__.py`.
-- Added `StaleReviewError` in `src/admitsense/storage/review_repository.py` and exported in `src/admitsense/storage/__init__.py`.
-- Added `ReviewRepository.get_finding_snapshot(case_id, finding_id, revision) -> Finding | None`.
-- Added `ReviewRepository.list_all_revisions(case_id) -> list[Revision]`.
-- Updated `ReviewRepository.save_review_packet(packet, expected_prior_packet_version=None)`.
-- Updated `ReviewService.execute_review` to guard against stale concurrent packet overwrites.
-- Recorded agreed M5 interfaces in `docs/CONTRACTS.md` (Sections 2.5 and 3.5).
+- Added `HospitalRecordReference` schema in `src/admitsense/schemas.py`.
+- Added optional `hospital_record: HospitalRecordReference | None = None` to `ReviewPacket` in `src/admitsense/schemas.py`.
+- Added module `src/admitsense/documents/hospital_directory.py` exporting `HospitalMatchStatus`, `HospitalLookupResult`, `HospitalLookupService`, and `LocalSyntheticHospitalDirectory`.
+- Added module `src/admitsense/export/html_exporter.py` and exported `generate_review_packet_html` in `src/admitsense/export/__init__.py`.
+- Updated `docs/CONTRACTS.md` adding Section 2.6 and marking Section 3.4 as AGREED.
+
 Checks and results:
-- `pytest tests/test_m5_replay.py` -> 5/5 passed in 1.23s.
-- `python tests/verify_m5.py` -> 9/9 checks passed:
-  - Base policy ingestion & initial unresolved finding at rev 1.
-  - Endorsement ingestion without replacing older base policy v1.
-  - Reassessment revises finding (rev 1 -> rev 2) with endorsement citation on p.1.
-  - Duplicate uploads and re-reviews emit 0 duplicate revisions.
-  - Historical snapshots at rev 1 and rev 2 both accessible with their respective evidence.
-  - Application restart preserves full replay audit history.
-  - StaleReviewError rejects attempts to overwrite newer review states.
-  - Transactional rollback on failed save leaves previous review intact.
-  - Authorisation invariant strictly remains 'not verified'.
-- `pytest` (full test suite) -> 99/99 passed in 10.88s.
-- Regression verification scripts: `verify_m1.py`, `verify_m2.py`, `verify_m3.py`, `verify_m4.py` -> all passed.
+- `pytest tests/test_m6_export.py -v` -> 7/7 passed in 0.55s:
+  - Export is deterministic and contains complete snapshot data.
+  - Special characters and script tags escaped safely.
+  - Zero secrets, internal paths, or broken links in export.
+  - Incomplete packets retain visible limitations and stop reasons.
+  - Historical packets retain original findings across subsequent revisions.
+  - Hospital directory states (matched, no_match, ambiguous, missing) and synthetic disclaimers verified.
+  - Authorization status strictly remains 'not verified'.
+- `python tests/verify_m6.py` -> 9/9 verification checks passed:
+  - Hospital directory lookup states verified.
+  - Synthetic dataset transparency and non-authorisation disclaimer present.
+  - Snapshot construction with findings, citations, checklist, questions, and revisions verified.
+  - Deterministic HTML generation verified.
+  - Complete HTML escaping verified.
+  - Export safety (no internal paths or file:// links) verified.
+  - Incomplete review export with visible limitations verified.
+  - Historical packet snapshot immutability verified.
+  - Standalone HTML document structure valid.
+- `pytest` (full test suite) -> 114/114 passed across entire repository in 15.17s.
+- Milestone regression scripts:
+  - `python tests/verify_m1.py` -> 5/5 passed.
+  - `python tests/verify_m2.py` -> 8/8 passed.
+  - `python tests/verify_m3.py` -> 8/8 passed.
+  - `python tests/verify_m4.py` -> 15/15 passed.
+  - `python tests/verify_m5.py` -> 16/16 passed.
+  - `python tests/verify_m6.py` -> 9/9 passed.
+
 Mocks / limitations / blockers:
-- Owner A interface & storage side is complete without mocks.
-- `FixtureReviewRunner` provides clearly labelled interim fixture behaviour while Owner B implements live applicability and reassessment logic (`M5-B`).
+- Owner A interface & export side is complete without mocks.
+- `LocalSyntheticHospitalDirectory` provides the agreed directory lookup adapter for UI preview and export.
+- Did not implement Owner B's review runner lookup tool or question-generation logic (`M6-B`).
+
 Next action for other owner (Owner B):
-- Implement M5-B in `src/admitsense/agent/review.py`:
-  - Applicability checks (effective dates, policy IDs, member match) on uploaded endorsements.
-  - Use `compute_evidence_replay` or emit `Revision` entries linking old/new finding revisions.
-  - Reassess waiting periods when endorsements apply.
-  - When integrated, `ReviewService` and the Replay UI will automatically persist and render Owner B's live revisions.
+- Implement M6-B in `src/admitsense/agent/review.py`:
+  - Hospital lookup tool (`lookup_hospital`) providing `HospitalRecordReference` with synthetic record ID, dataset version (`v2026.1`), and publication date (`2026-10-01`).
+  - Structured desk questions generation for admission desk and insurer.
+  - Validate output wording for limitations and unresolved conditions.
+  - When integrated, `generate_review_packet_html` and the workspace preview will seamlessly render Owner B's live hospital lookups and desk questions from the persisted packet.

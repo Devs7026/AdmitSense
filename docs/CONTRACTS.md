@@ -215,6 +215,58 @@ class ReviewRepository(Protocol):
         ...
 ```
 
+### 2.6 Hospital Lookup Service & HTML Export Interfaces (AGREED - M6)
+```python
+from datetime import date
+from typing import Literal, Protocol, Sequence
+from pydantic import BaseModel, Field
+from admitsense.schemas import HospitalRecordReference, ReviewPacket
+from admitsense.documents.models import DocumentRecord
+
+HospitalMatchStatus = Literal[
+    "matched",
+    "no_match",
+    "ambiguous_match",
+    "missing_information",
+]
+
+class HospitalLookupResult(BaseModel):
+    status: HospitalMatchStatus
+    record: HospitalRecordReference | None = None
+    candidates: list[HospitalRecordReference] = Field(default_factory=list)
+    query: str | None = None
+    dataset_version: str = "v2026.1"
+    dataset_date: date = Field(default_factory=lambda: date(2026, 10, 1))
+    message: str = ""
+    disclaimer: str = (
+        "SYNTHETIC DEMONSTRATION DATASET. Not indicative of real network agreements "
+        "or claim approval. Does not establish current insurer network agreement or cashless guarantee."
+    )
+    is_synthetic: bool = True
+
+class HospitalLookupService(Protocol):
+    def lookup_hospital(
+        self,
+        hospital_name: str | None,
+        city: str | None = None,
+    ) -> HospitalLookupResult:
+        """Lookup a synthetic hospital record by name and optional city."""
+        ...
+
+def generate_review_packet_html(
+    packet: ReviewPacket,
+    hospital_result: HospitalLookupResult | None = None,
+    hospital_record: HospitalRecordReference | None = None,
+    available_documents: Sequence[DocumentRecord] | None = None,
+) -> str:
+    """
+    Renders a standalone, self-contained HTML5 packet directly from a saved ReviewPacket snapshot.
+    Deterministic export with zero live model queries or database writes during generation.
+    All dynamic text is HTML-escaped. Standalone file opens independently in any browser.
+    """
+    ...
+```
+
 ---
 
 ## 3. Proposed Agent & Review Interfaces (PROPOSED)
@@ -279,7 +331,7 @@ class ToolActivityEvent(BaseModel):
     timestamp: datetime
 ```
 
-### 3.4 Synthetic Hospital Record Schema (PROPOSED)
+### 3.4 Synthetic Hospital Record Schema (AGREED - M6)
 Hospital reference data is strictly separate from PDF citations and contains explicit dataset versions and dates:
 ```python
 from datetime import date
