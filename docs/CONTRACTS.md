@@ -165,21 +165,45 @@ class EvidenceRetrieval(Protocol):
         ...
 ```
 
-### 2.5 Review Persistence & Atomic Revisions (AGREED)
+### 2.5 Review Persistence, Replay Snapshots & Atomic Revisions (AGREED)
 ```python
+class StaleReviewError(RuntimeError):
+    """Raised when an execution attempts to save against an outdated case/packet state."""
+    pass
+
 class ReviewRepository(Protocol):
-    def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket:
+    def save_review_packet(
+        self,
+        packet: ReviewPacket,
+        expected_prior_packet_version: int | None = None,
+    ) -> ReviewPacket:
         """
-        Persists a review packet snapshot. Must be executed in a single transaction:
-        1. Insert/update ReviewPacket metadata.
-        2. Insert current findings with their revision number.
-        3. Insert new Revision entries linking old and new finding revisions.
-        4. Insert missing evidence checklist items.
+        Persists a review packet snapshot atomically in a single SQLite transaction:
+        1. If expected_prior_packet_version is specified, verify current latest version in DB matches.
+           If database has a newer version, raises StaleReviewError and aborts without mutating.
+        2. Insert ReviewPacket metadata and JSON snapshot.
+        3. Insert current findings with their revision number (retaining prior packet finding snapshots).
+        4. Insert new Revision entries linking old and new finding revisions.
+        5. Insert/update missing evidence checklist items.
+        Rolls back completely if any insert fails.
         """
         ...
 
     def get_latest_review_packet(self, case_id: str) -> ReviewPacket | None:
         """Fetch the most recent review packet for a case."""
+        ...
+
+    def list_review_packets(self, case_id: str) -> list[ReviewPacket]:
+        """List all historical review packet snapshots for a case."""
+        ...
+
+    def get_finding_snapshot(
+        self,
+        case_id: str,
+        finding_id: str,
+        revision: int,
+    ) -> Finding | None:
+        """Fetch the exact historical finding record and its evidence at a specific revision."""
         ...
 
     def get_finding_history(
@@ -215,6 +239,7 @@ class ReviewRunner(Protocol):
         case: CaseDetails,
         retrieval: EvidenceRetrieval,
         prior_packet: ReviewPacket | None = None,
+        user_answers: dict[str, Any] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
         event_callback: Callable[[ToolActivityEvent], None] | None = None,
@@ -231,7 +256,7 @@ class ReviewRunner(Protocol):
         ...
 ```
 
-### 3.3 Tool Activity Events & Streamlit Telemetry (PROPOSED)
+### 3.3 Tool Activity Events & Streamlit Telemetry (AGREED)
 Owner A's Streamlit workspace displays real-time agent activity via the following event schema:
 ```python
 from datetime import datetime
@@ -322,18 +347,27 @@ def compute_evidence_replay(
 ) -> tuple[list[Finding], list[Revision]]:
     """
     Computes delta between prior_packet findings and new findings:
-    1. Identifies substantively changed, unchanged, and newly introduced findings.
-    2. Increments revision by exactly 1 for substantively changed findings.
-    3. Emits Revision audit records with old/new status, conclusion, and triggering evidence/facts.
-    4. Leaves unchanged findings at their prior revision number.
-    5. Returns (updated_current_findings, accumulated_revisions).
+    1. Distinguishes three finding categories:
+       - Changed findings: status, conclusion, evidence, or next action differs from prior finding.
+         Finding.revision increments by exactly 1 (old_finding.revision + 1).
+         A Revision record is emitted linking old to new revision.
+       - Unchanged findings: status, conclusion, evidence, and next action match prior finding.
+         Finding.revision remains at old_finding.revision.
+         Zero new Revision records are emitted for unchanged findings.
+       - New findings: finding_id did not exist in prior_packet.
+         Finding.revision is set to 1. No prior Revision record.
+    2. Enforces trigger integrity:
+       - trigger_type='new_document' requires triggering_evidence.
+       - trigger_type in {'user_correction', 'case_details_changed'} requires changed_case_facts.
+    3. Preserves accumulated prior revisions, appending newly generated revisions.
+    4. Returns (updated_findings_list, all_revisions_list).
     """
     ...
 ```
 
 ### 3.6 Persistence Boundaries & Separation of Concerns
 - **Owner B (Agent / Review)**: Pure deterministic & LLM logic. Generates and validates `ReviewPacket`, `Finding`, `Revision`, and `ToolActivityEvent`. Does not write to SQLite or disk directly.
-- **Owner A (Storage / UI)**: Invokes `ReviewRunner.run_review`, streams `ToolActivityEvent` to the Streamlit UI, and commits the resulting `ReviewPacket` to SQLite via `ReviewRepository.save_review_packet`.
+- **Owner A (Storage / UI)**: Invokes `ReviewRunner.run_review`, streams `ToolActivityEvent` to the Streamlit UI, rejects stale reviews, and commits the resulting `ReviewPacket` to SQLite via `ReviewRepository.save_review_packet`.
 
 ---
 

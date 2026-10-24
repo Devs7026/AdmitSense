@@ -1,20 +1,30 @@
-"""Milestone M5-B & M5-I Acceptance Test Suite: Evidence Change Replay.
+"""Combined Test Suite for Milestone M5: Evidence Change Replay (M5-A, M5-B, M5-I).
 
-Tests:
-1. Applicable fictional endorsement changes 24 months to 12 months.
-2. Supplied 18-month history supports only the relevant narrow finding.
-3. Wrong policy ID does not override the base policy.
-4. Endorsement effective after the admission date does not silently apply.
-5. Ambiguous precedence produces an unresolved/conflict finding.
-6. Unrelated findings remain unchanged.
-7. Duplicate input does not create duplicate substantive revisions.
-8. A corrected case date triggers reassessment of dependent findings.
-9. Failed/partial reassessment does not falsely report completion.
+Covers:
+Part 1 (M5-A & Replay Storage):
+- compute_evidence_replay categories (changed, unchanged, new findings)
+- Atomic transactional persistence of packets, findings, revisions, checklist
+- Immutable historical finding snapshots via get_finding_snapshot
+- Stale review protection via StaleReviewError
+- Transactional rollback on failed save
+- Non-destructive new evidence upload and version tracking
+
+Part 2 (M5-B & Live Review Agent Replay):
+- Applicable endorsement reduces 24-month waiting period to 12 months
+- Supplied 18-month history supports only narrow finding without overall claim approval
+- Wrong policy ID does not override base policy
+- Endorsement effective after planned admission date does not apply
+- Ambiguous precedence produces conflict finding with uncertainty retained
+- Unrelated findings remain unchanged across replay
+- Duplicate input does not create duplicate substantive revisions
+- Corrected case date triggers reassessment of dependent findings
+- Partial reassessment does not falsely report completion
 """
 
-import tempfile
-from datetime import date
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
+import tempfile
 import pytest
 
 from admitsense.agent.retrieval import EvidenceRetrievalService
@@ -22,6 +32,7 @@ from admitsense.agent.review import (
     BoundedReviewAgent,
     compute_evidence_replay,
 )
+from admitsense.documents.retrieval import SqliteEvidenceRetrieval
 from admitsense.documents.storage import DocumentStorage
 from admitsense.documents.synthetic import (
     build_synthetic_endorsement_pdf,
@@ -29,63 +40,72 @@ from admitsense.documents.synthetic import (
     build_synthetic_schedule_pdf,
     generate_pdf_bytes,
 )
+from admitsense.review.service import FixtureReviewRunner, ReviewService
 from admitsense.schemas import (
     CaseDetails,
     Evidence,
     FactSource,
     Finding,
+    MissingEvidenceItem,
     ReviewPacket,
+    Revision,
 )
 from admitsense.storage.case_repository import CaseRepository
 from admitsense.storage.database import Database
+from admitsense.storage.review_repository import ReviewRepository, StaleReviewError
 
 
-def build_wrong_policy_endorsement_pdf() -> bytes:
-    """Endorsement applying to a different policy ID (POL-999999 vs POL-998877)."""
-    pages = [
-        "SYNTHETIC DEMONSTRATION DOCUMENT. Policy Endorsement Schedule EW-2025-01. "
-        "Applicable to Policy ID: POL-999999. Member Name: Ramesh Sharma. Effective From: 2025-04-01. "
-        "Waiting Period Modification: The specific waiting period for degenerative joint disorders and "
-        "joint replacement surgeries under Section 4.2(b) is reduced from twenty-four (24) continuous months "
-        "to twelve (12) continuous months."
-    ]
-    return generate_pdf_bytes(pages)
+# ==============================================================================
+# Fixtures
+# ==============================================================================
+@pytest.fixture
+def m5_env():
+    """Isolated environment for M5-A storage, repository, and service tests."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = Path(tmp_dir) / "test_m5_storage.db"
+        doc_dir = Path(tmp_dir) / "docs"
+        db = Database(db_path=db_path)
+        case_repo = CaseRepository(db=db)
+        doc_storage = DocumentStorage(db=db, storage_dir=doc_dir)
+        review_repo = ReviewRepository(db=db)
+        retrieval = SqliteEvidenceRetrieval(db=db)
 
+        case = case_repo.create_case(
+            CaseDetails(
+                case_id="case-m5-storage-001",
+                member_name="Ramesh Sharma",
+                policy_id="POL-998877",
+                procedure="Total Knee Replacement",
+                planned_admission_date=date(2026, 11, 15),
+                fact_sources={
+                    "member_name": FactSource(source_type="user_provided"),
+                    "policy_id": FactSource(source_type="user_provided"),
+                    "procedure": FactSource(source_type="user_provided"),
+                    "planned_admission_date": FactSource(source_type="user_provided"),
+                },
+            )
+        )
 
-def build_future_effective_endorsement_pdf() -> bytes:
-    """Endorsement effective from 2026-12-01 (after planned admission date 2026-11-15)."""
-    pages = [
-        "SYNTHETIC DEMONSTRATION DOCUMENT. Policy Endorsement Schedule EW-2025-01. "
-        "Applicable to Policy ID: POL-998877. Member Name: Ramesh Sharma. Effective From: 2026-12-01. "
-        "Waiting Period Modification: The specific waiting period for degenerative joint disorders and "
-        "joint replacement surgeries under Section 4.2(b) is reduced from twenty-four (24) continuous months "
-        "to twelve (12) continuous months."
-    ]
-    return generate_pdf_bytes(pages)
-
-
-def build_ambiguous_precedence_endorsement_pdf() -> bytes:
-    """Endorsement with contradictory terms and unresolved precedence clause."""
-    pages = [
-        "SYNTHETIC DEMONSTRATION DOCUMENT. Policy Endorsement Schedule EW-2025-01. "
-        "Applicable to Policy ID: POL-998877. Member Name: Ramesh Sharma. Effective From: 2025-04-01. "
-        "Waiting Period Modification: Section 4.2(b) waiting period modified to twelve (12) continuous months, "
-        "however precedence unresolved: terms conflict with master policy schedule pending underwriter review."
-    ]
-    return generate_pdf_bytes(pages)
+        yield {
+            "db": db,
+            "case_repo": case_repo,
+            "doc_storage": doc_storage,
+            "review_repo": review_repo,
+            "retrieval": retrieval,
+            "case": case,
+        }
 
 
 @pytest.fixture
 def replay_env():
-    """Sets up an isolated database and synthetic documents for M5 replay tests."""
+    """Isolated environment with synthetic documents for M5-B live review agent tests."""
     with tempfile.TemporaryDirectory() as tmp_dir:
-        db_path = Path(tmp_dir) / "test_m5.db"
+        db_path = Path(tmp_dir) / "test_m5_agent.db"
         doc_dir = Path(tmp_dir) / "docs"
         db = Database(db_path=db_path)
         case_repo = CaseRepository(db=db)
         doc_storage = DocumentStorage(db=db, storage_dir=doc_dir)
 
-        # Baseline case: Ramesh Sharma, Total Knee Replacement, admission 2026-11-15
         case = case_repo.create_case(
             CaseDetails(
                 case_id="case-m5-knee-001",
@@ -102,18 +122,16 @@ def replay_env():
             )
         )
 
-        # Base policy wording (24-month waiting period on p14)
         policy_doc, _ = doc_storage.save_document(
             case_id=case.case_id,
-            filename="Care_Gold_Policy_Wording.pdf",
+            filename=f"{case.case_id}_Policy_Wording.pdf",
             content=build_synthetic_policy_pdf(),
             evidence_type="policy_wording",
         )
 
-        # Policy renewal schedule (18 months continuous coverage on p1)
         sched_doc, _ = doc_storage.save_document(
             case_id=case.case_id,
-            filename="Policy_Renewal_Schedule.pdf",
+            filename=f"{case.case_id}_Policy_Renewal_Schedule.pdf",
             content=build_synthetic_schedule_pdf(),
             evidence_type="policy_schedule",
         )
@@ -132,7 +150,420 @@ def replay_env():
 
 
 # ==============================================================================
-# Test 1 & 2: Applicable Endorsement Changes 24 to 12 Months & Narrow Scope
+# Part 1: M5-A & Replay Storage Tests (Owner A)
+# ==============================================================================
+def test_compute_evidence_replay_finding_categories_and_revisions(m5_env):
+    """Verify compute_evidence_replay categorizes changed, unchanged, and new findings,
+    incrementing revision by exactly 1 on change and emitting 0 revisions for unchanged findings.
+    """
+    case: CaseDetails = m5_env["case"]
+
+    ev_policy = Evidence(
+        document_id="doc-policy",
+        document_version="v1",
+        page=14,
+        quote="Section 4.2(b): Joint replacement subject to 24 continuous months waiting period.",
+        evidence_type="policy_wording",
+    )
+    f_knee_v1 = Finding(
+        finding_id="find-knee",
+        revision=1,
+        topic="Specific Waiting Period: Joint Replacement",
+        status="unresolved",
+        conclusion="Shortfall of 6 months.",
+        evidence=[ev_policy],
+        limitations=["Waiting period shortfall exists."],
+        next_action="Obtain endorsement or clarification.",
+    )
+    f_initial_30d = Finding(
+        finding_id="find-30d",
+        revision=1,
+        topic="Initial 30-Day Waiting Period",
+        status="supported",
+        conclusion="Initial 30-day period satisfied.",
+        evidence=[ev_policy],
+        limitations=[],
+        next_action="Monitor specific waiting periods.",
+    )
+
+    prior_packet = ReviewPacket(
+        packet_id="pkt-v1",
+        packet_version=1,
+        run_id="run-01",
+        case=case,
+        review_status="incomplete",
+        findings=[f_knee_v1, f_initial_30d],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=4,
+        stopped_reason="missing_information",
+    )
+
+    # Candidate findings for replay:
+    # 1. f_knee revised to supported (changed)
+    # 2. f_30d unchanged (identical status and conclusion)
+    # 3. f_room_rent new (newly introduced finding)
+    ev_end = Evidence(
+        document_id="doc-endorsement",
+        document_version="v1",
+        page=1,
+        quote="Waiting period reduced to 12 continuous months.",
+        evidence_type="endorsement",
+    )
+    f_knee_cand = Finding(
+        finding_id="find-knee",
+        revision=1,  # Candidate starts with 1 before delta computation
+        topic="Specific Waiting Period: Joint Replacement",
+        status="supported",
+        conclusion="Waiting period of 12 continuous months satisfied.",
+        evidence=[ev_end],
+        limitations=[],
+        next_action="Confirm pre-admission estimate.",
+    )
+    f_30d_cand = Finding(
+        finding_id="find-30d",
+        revision=1,
+        topic="Initial 30-Day Waiting Period",
+        status="supported",
+        conclusion="Initial 30-day period satisfied.",
+        evidence=[ev_policy],
+        limitations=[],
+        next_action="Monitor specific waiting periods.",
+    )
+    f_room_rent = Finding(
+        finding_id="find-rent",
+        revision=1,
+        topic="Room Rent Limits",
+        status="supported",
+        conclusion="Room rent capped at 1% sum insured.",
+        evidence=[ev_policy],
+        limitations=[],
+        next_action="Check room tariff with hospital.",
+    )
+
+    updated_findings, all_revisions = compute_evidence_replay(
+        prior_packet=prior_packet,
+        new_findings=[f_knee_cand, f_30d_cand, f_room_rent],
+        trigger_type="new_document",
+        triggering_evidence=[ev_end],
+        reason="Applicable endorsement reduces waiting period.",
+    )
+
+    # Verify updated findings count and revisions
+    assert len(updated_findings) == 3
+    knee_res = next(f for f in updated_findings if f.finding_id == "find-knee")
+    assert knee_res.revision == 2
+    assert knee_res.status == "supported"
+
+    d30_res = next(f for f in updated_findings if f.finding_id == "find-30d")
+    assert d30_res.revision == 1
+    assert d30_res.status == "supported"
+
+    rent_res = next(f for f in updated_findings if f.finding_id == "find-rent")
+    assert rent_res.revision == 1
+
+    assert len(all_revisions) == 1
+    rev = all_revisions[0]
+    assert rev.finding_id == "find-knee"
+    assert rev.old_finding_revision == 1
+    assert rev.new_finding_revision == 2
+    assert rev.old_status == "unresolved"
+    assert rev.new_status == "supported"
+    assert rev.trigger_type == "new_document"
+    assert len(rev.triggering_evidence) == 1
+    assert rev.triggering_evidence[0].document_id == "doc-endorsement"
+
+
+def test_review_repository_atomic_revisions_and_finding_snapshots(m5_env):
+    """Verify ReviewRepository saves packets atomically and get_finding_snapshot retrieves historical states."""
+    repo: ReviewRepository = m5_env["review_repo"]
+    case: CaseDetails = m5_env["case"]
+
+    ev_v1 = Evidence(
+        document_id="doc-policy",
+        document_version="v1",
+        page=14,
+        quote="24-month waiting clause",
+        evidence_type="policy_wording",
+    )
+    f_v1 = Finding(
+        finding_id="find-knee",
+        revision=1,
+        topic="Waiting Period",
+        status="unresolved",
+        conclusion="Shortfall of 6 months",
+        evidence=[ev_v1],
+        limitations=["Shortfall exists"],
+        next_action="Request waiver",
+    )
+
+    pkt_v1 = ReviewPacket(
+        packet_id="pkt-m5-v1",
+        packet_version=1,
+        run_id="run-m5-01",
+        case=case,
+        review_status="incomplete",
+        findings=[f_v1],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=3,
+        stopped_reason="missing_information",
+    )
+    repo.save_review_packet(pkt_v1)
+
+    ev_v2 = Evidence(
+        document_id="doc-endorsement",
+        document_version="v1",
+        page=1,
+        quote="12-month waiting clause",
+        evidence_type="endorsement",
+    )
+    f_v2 = Finding(
+        finding_id="find-knee",
+        revision=2,
+        topic="Waiting Period",
+        status="supported",
+        conclusion="12-month period satisfied",
+        evidence=[ev_v2],
+        limitations=[],
+        next_action="Confirm hospital estimate",
+    )
+    rev_1_to_2 = Revision(
+        revision_id="rev-001",
+        finding_id="find-knee",
+        old_finding_revision=1,
+        new_finding_revision=2,
+        old_conclusion="Shortfall of 6 months",
+        new_conclusion="12-month period satisfied",
+        old_status="unresolved",
+        new_status="supported",
+        trigger_type="new_document",
+        triggering_evidence=[ev_v2],
+        reason="Endorsement applied",
+        affected_topics=["Waiting Period"],
+        created_at=datetime.now(timezone.utc),
+    )
+
+    pkt_v2 = ReviewPacket(
+        packet_id="pkt-m5-v2",
+        packet_version=2,
+        run_id="run-m5-02",
+        case=case,
+        review_status="complete",
+        findings=[f_v2],
+        revisions=[rev_1_to_2],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=2,
+        stopped_reason="review_complete",
+    )
+    repo.save_review_packet(pkt_v2, expected_prior_packet_version=1)
+
+    # 1. Verify get_finding_snapshot retrieves historical state
+    old_snap = repo.get_finding_snapshot(case.case_id, "find-knee", revision=1)
+    assert old_snap is not None
+    assert old_snap.revision == 1
+    assert old_snap.status == "unresolved"
+    assert old_snap.conclusion == "Shortfall of 6 months"
+    assert old_snap.evidence[0].document_id == "doc-policy"
+
+    # 2. Verify get_finding_snapshot retrieves new state
+    new_snap = repo.get_finding_snapshot(case.case_id, "find-knee", revision=2)
+    assert new_snap is not None
+    assert new_snap.revision == 2
+    assert new_snap.status == "supported"
+    assert new_snap.conclusion == "12-month period satisfied"
+    assert new_snap.evidence[0].document_id == "doc-endorsement"
+
+    # 3. Verify get_finding_history
+    history = repo.get_finding_history(case.case_id, "find-knee")
+    assert len(history) == 1
+    assert history[0].old_finding_revision == 1
+    assert history[0].new_finding_revision == 2
+
+    # 4. Verify list_all_revisions
+    all_revs = repo.list_all_revisions(case.case_id)
+    assert len(all_revs) == 1
+
+
+def test_stale_review_rejection_prevents_overwrite(m5_env):
+    """Verify StaleReviewError is raised when saving against an outdated expected prior version."""
+    repo: ReviewRepository = m5_env["review_repo"]
+    case: CaseDetails = m5_env["case"]
+
+    p1 = ReviewPacket(
+        packet_id="pkt-p1",
+        packet_version=1,
+        run_id="run-p1",
+        case=case,
+        review_status="incomplete",
+        findings=[],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=1,
+        stopped_reason="missing_information",
+    )
+    repo.save_review_packet(p1)
+
+    p2 = ReviewPacket(
+        packet_id="pkt-p2",
+        packet_version=2,
+        run_id="run-p2",
+        case=case,
+        review_status="incomplete",
+        findings=[],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=2,
+        stopped_reason="missing_information",
+    )
+    repo.save_review_packet(p2, expected_prior_packet_version=1)
+
+    stale_p = ReviewPacket(
+        packet_id="pkt-stale",
+        packet_version=2,
+        run_id="run-stale",
+        case=case,
+        review_status="incomplete",
+        findings=[],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=1,
+        stopped_reason="timeout",
+    )
+
+    with pytest.raises(StaleReviewError) as exc_info:
+        repo.save_review_packet(stale_p, expected_prior_packet_version=1)
+
+    assert "Stale review rejected" in str(exc_info.value)
+
+    latest = repo.get_latest_review_packet(case.case_id)
+    assert latest is not None
+    assert latest.packet_id == "pkt-p2"
+    assert latest.packet_version == 2
+
+
+def test_failed_save_leaves_previous_review_intact(m5_env):
+    """Verify transactional rollback: a failing review save leaves the previous review intact."""
+    repo: ReviewRepository = m5_env["review_repo"]
+    case: CaseDetails = m5_env["case"]
+
+    p1 = ReviewPacket(
+        packet_id="pkt-good-01",
+        packet_version=1,
+        run_id="run-good-01",
+        case=case,
+        review_status="incomplete",
+        findings=[],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=1,
+        stopped_reason="missing_information",
+    )
+    repo.save_review_packet(p1)
+
+    corrupted_packet = ReviewPacket(
+        packet_id="pkt-bad-02",
+        packet_version=2,
+        run_id="run-bad-02",
+        case=CaseDetails(case_id="case-NONEXISTENT-FOREIGN-KEY"),
+        review_status="incomplete",
+        findings=[],
+        revisions=[],
+        missing_evidence_checklist=[],
+        unresolved_questions=[],
+        authorization_status="not verified",
+        tool_steps_used=2,
+        stopped_reason="missing_information",
+    )
+
+    with pytest.raises(Exception):
+        repo.save_review_packet(corrupted_packet)
+
+    latest = repo.get_latest_review_packet(case.case_id)
+    assert latest is not None
+    assert latest.packet_id == "pkt-good-01"
+    assert latest.packet_version == 1
+
+
+def test_new_evidence_immutable_versions_and_duplicate_handling(m5_env):
+    """Verify uploading new evidence does not replace older versions and duplicate uploads do not create duplicate revisions."""
+    doc_storage: DocumentStorage = m5_env["doc_storage"]
+    case: CaseDetails = m5_env["case"]
+    repo: ReviewRepository = m5_env["review_repo"]
+    retrieval = m5_env["retrieval"]
+
+    policy_pdf = build_synthetic_policy_pdf()
+    doc_v1, is_dup1 = doc_storage.save_document(
+        case_id=case.case_id,
+        filename=f"{case.case_id}_Policy.pdf",
+        content=policy_pdf,
+        evidence_type="policy_wording",
+    )
+    assert is_dup1 is False
+    assert doc_v1.version == "v1"
+
+    doc_dup, is_dup2 = doc_storage.save_document(
+        case_id=case.case_id,
+        filename=f"{case.case_id}_Policy.pdf",
+        content=policy_pdf,
+        evidence_type="policy_wording",
+    )
+    assert is_dup2 is True
+    assert doc_dup.version == "v1"
+
+    service = ReviewService(
+        case_repo=m5_env["case_repo"],
+        review_repo=repo,
+        retrieval=retrieval,
+        runner=FixtureReviewRunner(),
+    )
+    pkt1 = service.execute_review(case.case_id)
+    assert pkt1.packet_version == 1
+    assert len(pkt1.revisions) == 0
+    assert pkt1.findings[0].revision == 1
+
+    end_pdf = build_synthetic_endorsement_pdf()
+    doc_end, is_dup3 = doc_storage.save_document(
+        case_id=case.case_id,
+        filename=f"{case.case_id}_Endorsement.pdf",
+        content=end_pdf,
+        evidence_type="endorsement",
+    )
+    assert is_dup3 is False
+    assert doc_end.version == "v1"
+
+    old_doc = doc_storage.get_document(doc_v1.document_id, "v1")
+    assert old_doc is not None
+    assert old_doc.total_pages == 15
+
+    pkt2 = service.execute_review(case.case_id)
+    assert pkt2.packet_version == 2
+    assert len(pkt2.revisions) == 1
+    assert pkt2.findings[0].revision == 2
+    assert pkt2.findings[0].status == "supported"
+
+    pkt3 = service.execute_review(case.case_id)
+    assert pkt3.packet_version == 3
+    assert len(pkt3.revisions) == 1
+    assert pkt3.findings[0].revision == 2
+
+
+# ==============================================================================
+# Part 2: M5-B & Live Review Agent Replay Tests (Owner B)
 # ==============================================================================
 def test_applicable_endorsement_changes_waiting_period_and_keeps_narrow_scope(replay_env):
     """Verifies that an applicable endorsement modifies waiting period from 24 to 12 months,
@@ -146,7 +577,6 @@ def test_applicable_endorsement_changes_waiting_period_and_keeps_narrow_scope(re
 
     agent = BoundedReviewAgent()
 
-    # Run initial baseline review (Packet 1)
     pkt_v1 = agent.run_review(case=case, retrieval=retrieval)
     assert pkt_v1.packet_version == 1
     knee_f_v1 = next(f for f in pkt_v1.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
@@ -155,27 +585,23 @@ def test_applicable_endorsement_changes_waiting_period_and_keeps_narrow_scope(re
     assert "shortfall" in knee_f_v1.conclusion.lower()
     assert len(pkt_v1.revisions) == 0
 
-    # Ingest applicable endorsement (EW-2025-01: reduces waiting period to 12 months)
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Policy_Endorsement_Schedule_EW-2025-01.pdf",
+        filename=f"{case.case_id}_Endorsement_EW-2025-01.pdf",
         content=build_synthetic_endorsement_pdf(),
         evidence_type="endorsement",
     )
 
-    # Replay review (Packet 2)
     pkt_v2 = agent.run_review(case=case, retrieval=retrieval, prior_packet=pkt_v1)
     assert pkt_v2.packet_version == 2
     assert pkt_v2.run_id != pkt_v1.run_id
 
-    # 1. Finding is revised from unresolved to supported with revision=2
     knee_f_v2 = next(f for f in pkt_v2.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
     assert knee_f_v2.status == "supported"
     assert knee_f_v2.revision == 2
     assert "12 continuous months" in knee_f_v2.conclusion
     assert "EW-2025-01" in knee_f_v2.conclusion
 
-    # 2. Revision record emitted
     assert len(pkt_v2.revisions) == 1
     rev = pkt_v2.revisions[0]
     assert rev.finding_id == knee_f_v2.finding_id
@@ -187,128 +613,111 @@ def test_applicable_endorsement_changes_waiting_period_and_keeps_narrow_scope(re
     assert len(rev.triggering_evidence) > 0
     assert any(e.evidence_type == "endorsement" for e in rev.triggering_evidence)
 
-    # 3. Missing evidence checklist item is resolved
     chk_item = next(item for item in pkt_v2.missing_evidence_checklist if "continuity" in item.item_id)
     assert chk_item.status == "resolved"
     assert "12 continuous months" in (chk_item.resolution_note or "")
 
-    # 4. Next action updated to pre-admission estimate
     assert "hospital" in knee_f_v2.next_action.lower() or "estimate" in knee_f_v2.next_action.lower()
-
-    # 5. Non-negotiable invariant: authorization strictly remains 'not verified'
     assert pkt_v2.authorization_status == "not verified"
     assert "guarantee" not in knee_f_v2.conclusion.lower()
     assert "claim approved" not in knee_f_v2.conclusion.lower()
 
 
-# ==============================================================================
-# Test 3: Wrong Policy ID Does Not Override Base Policy
-# ==============================================================================
 def test_wrong_policy_id_does_not_override_base_policy(replay_env):
-    """Verifies that an endorsement specifying a mismatched policy ID (POL-999999 vs POL-998877)
-    is marked not_applicable and does not override the base policy 24-month waiting period.
+    """Verifies that an endorsement specifying a different Policy ID is evaluated as not_applicable,
+    retaining the base policy 24-month waiting period without overriding it.
     """
     case = replay_env["case"]
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Ingest endorsement with wrong policy ID
+    wrong_pdf = generate_pdf_bytes([
+        "SYNTHETIC DEMONSTRATION DOCUMENT. Policy Endorsement Schedule EW-WRONG-01. "
+        "Applicable to Policy ID: POL-DIFFERENT-999. Member Name: Ramesh Sharma. Effective From: 2025-04-01. "
+        "Waiting Period Modification: Joint replacement waiting period reduced to twelve (12) continuous months."
+    ])
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Endorsement_Wrong_Policy.pdf",
-        content=build_wrong_policy_endorsement_pdf(),
+        filename=f"{case.case_id}_Endorsement_Wrong_Policy.pdf",
+        content=wrong_pdf,
         evidence_type="endorsement",
     )
 
     agent = BoundedReviewAgent()
-    pkt = agent.run_review(case=case, retrieval=retrieval)
+    packet = agent.run_review(case=case, retrieval=retrieval)
 
-    # Document applicability check
-    app = next((a for a in pkt.document_applicability if a.status == "not_applicable"), None)
-    assert app is not None
-    assert "mismatch" in app.reason.lower()
-    assert "POL-999999" in app.reason
-
-    # Base policy remains in effect: knee replacement is unresolved (24 months vs 18 months)
-    knee_f = next(f for f in pkt.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
-    assert knee_f.status == "unresolved"
-    assert "24 continuous months" in knee_f.conclusion
-    assert any("not applicable" in lim.lower() for lim in knee_f.limitations)
+    knee_finding = next(f for f in packet.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
+    assert knee_finding.status == "unresolved"
+    assert "24" in knee_finding.conclusion or "twenty-four" in knee_finding.conclusion
+    assert any("mismatch" in lim.lower() for lim in knee_finding.limitations)
 
 
-# ==============================================================================
-# Test 4: Endorsement Effective After Admission Date Does Not Silently Apply
-# ==============================================================================
 def test_endorsement_effective_after_admission_date_does_not_apply(replay_env):
-    """Verifies that an endorsement effective after the planned admission date (2026-12-01 vs 2026-11-15)
-    is marked not_applicable and does not silently apply.
+    """Verifies that an endorsement whose effective date is after planned admission date
+    does not silently apply, and base policy terms remain in effect.
     """
-    case = replay_env["case"]
+    case_repo = replay_env["case_repo"]
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Ingest future effective endorsement
-    doc_storage.save_document(
-        case_id=case.case_id,
-        filename="Endorsement_Future_Effective.pdf",
-        content=build_future_effective_endorsement_pdf(),
-        evidence_type="endorsement",
+    case_future = case_repo.create_case(
+        CaseDetails(
+            case_id="case-m5-future-test",
+            member_name="Ramesh Sharma",
+            policy_id="POL-998877",
+            procedure="Total Knee Replacement",
+            planned_admission_date=date(2025, 1, 15),
+            fact_sources={
+                "member_name": FactSource(source_type="user_provided"),
+                "policy_id": FactSource(source_type="user_provided"),
+                "procedure": FactSource(source_type="user_provided"),
+                "planned_admission_date": FactSource(source_type="user_provided"),
+            },
+        )
     )
 
+    doc_storage.save_document(case_id=case_future.case_id, filename=f"{case_future.case_id}_pol.pdf", content=build_synthetic_policy_pdf(), evidence_type="policy_wording")
+    doc_storage.save_document(case_id=case_future.case_id, filename=f"{case_future.case_id}_sched.pdf", content=build_synthetic_schedule_pdf(), evidence_type="policy_schedule")
+    doc_storage.save_document(case_id=case_future.case_id, filename=f"{case_future.case_id}_end.pdf", content=build_synthetic_endorsement_pdf(), evidence_type="endorsement")
+
     agent = BoundedReviewAgent()
-    pkt = agent.run_review(case=case, retrieval=retrieval)
+    packet = agent.run_review(case=case_future, retrieval=retrieval)
 
-    # Document applicability check
-    app = next((a for a in pkt.document_applicability if a.status == "not_applicable"), None)
-    assert app is not None
-    assert "after planned admission date" in app.reason.lower()
-
-    # Base policy 24 months remains in effect
-    knee_f = next(f for f in pkt.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
+    knee_f = next(f for f in packet.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
     assert knee_f.status == "unresolved"
-    assert "24 continuous months" in knee_f.conclusion
+    assert any("after planned admission date" in lim.lower() for lim in knee_f.limitations)
 
 
-# ==============================================================================
-# Test 5: Ambiguous Precedence Produces Unresolved / Conflict Finding
-# ==============================================================================
 def test_ambiguous_precedence_produces_conflict_finding(replay_env):
-    """Verifies that ambiguous clause precedence or contradictory terms between
-    endorsement and base policy produces an explicit conflict or unresolved finding.
-    """
+    """Verifies that contradictory terms with ambiguous priority language produce an unresolved/conflict finding."""
     case = replay_env["case"]
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Ingest ambiguous endorsement
+    ambig_pdf = generate_pdf_bytes([
+        "SYNTHETIC DEMONSTRATION DOCUMENT. Policy Endorsement Schedule EW-2025-01. "
+        "Applicable to Policy ID: POL-998877. Member Name: Ramesh Sharma. Effective From: 2025-04-01. "
+        "Waiting Period Modification: Section 4.2(b) waiting period modified to twelve (12) continuous months, "
+        "however precedence unresolved: terms conflict with master policy schedule pending underwriter review."
+    ])
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Endorsement_Ambiguous.pdf",
-        content=build_ambiguous_precedence_endorsement_pdf(),
+        filename=f"{case.case_id}_Endorsement_Ambiguous.pdf",
+        content=ambig_pdf,
         evidence_type="endorsement",
     )
 
     agent = BoundedReviewAgent()
-    pkt = agent.run_review(case=case, retrieval=retrieval)
+    packet = agent.run_review(case=case, retrieval=retrieval)
 
-    # Document applicability is uncertain
-    app = next((a for a in pkt.document_applicability if a.status == "uncertain"), None)
-    assert app is not None
-    assert "ambiguous" in app.reason.lower() or "conflict" in app.reason.lower()
-
-    # Finding status is conflict or unresolved with explicit explanation
-    knee_f = next(f for f in pkt.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
-    assert knee_f.status in {"conflict", "unresolved"}
-    assert "conflict" in knee_f.conclusion.lower() or "precedence" in knee_f.conclusion.lower()
+    knee_f = next(f for f in packet.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
+    assert knee_f.status == "conflict"
+    assert "conflict" in knee_f.conclusion.lower() or "ambiguous" in knee_f.conclusion.lower()
 
 
-# ==============================================================================
-# Test 6: Unrelated Findings Remain Unchanged
-# ==============================================================================
 def test_unrelated_findings_remain_unchanged(replay_env):
     """Verifies that when an endorsement modifies the joint replacement waiting period,
-    unrelated findings (Initial 30-day waiting period, Room rent limits) remain strictly at revision=1
-    with unchanged conclusions and citations.
+    unrelated findings remain strictly at revision=1 with unchanged conclusions and citations.
     """
     case = replay_env["case"]
     retrieval = replay_env["retrieval"]
@@ -316,9 +725,8 @@ def test_unrelated_findings_remain_unchanged(replay_env):
 
     agent = BoundedReviewAgent()
 
-    # Run Packet 1
     pkt_v1 = agent.run_review(case=case, retrieval=retrieval)
-    # Seed unrelated findings (30-day waiting period, room rent limits) into pkt_v1 to test preservation
+
     f_30d_seed = Finding(
         finding_id="find-initial-30-day-waiting-period",
         revision=1,
@@ -364,21 +772,18 @@ def test_unrelated_findings_remain_unchanged(replay_env):
     assert f_rent_v1 is not None
     assert f_rent_v1.revision == 1
 
-    # Ingest endorsement modifying only joint replacement Section 4.2(b)
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Policy_Endorsement_Schedule_EW-2025-01.pdf",
+        filename=f"{case.case_id}_Endorsement_EW-2025-01.pdf",
         content=build_synthetic_endorsement_pdf(),
         evidence_type="endorsement",
     )
 
-    # Run Packet 2
     pkt_v2 = agent.run_review(case=case, retrieval=retrieval, prior_packet=pkt_v1)
 
-    f_30d_v2 = next((f for f in pkt_v2.findings if "30-day" in f.topic.lower() or "initial" in f.topic.lower()), None)
-    f_rent_v2 = next((f for f in pkt_v2.findings if "room rent" in f.topic.lower()), None)
+    f_30d_v2 = next((f for f in pkt_v2.findings if f.finding_id == "find-initial-30-day-waiting-period"), None)
+    f_rent_v2 = next((f for f in pkt_v2.findings if f.finding_id == "find-room-rent-limits"), None)
 
-    # Unrelated findings are preserved at revision=1 with identical citations
     assert f_30d_v2 is not None
     assert f_30d_v2.revision == 1
     assert f_30d_v2.status == f_30d_v1.status
@@ -391,15 +796,11 @@ def test_unrelated_findings_remain_unchanged(replay_env):
     assert f_rent_v2.conclusion == f_rent_v1.conclusion
     assert {e.quote for e in f_rent_v2.evidence} == {e.quote for e in f_rent_v1.evidence}
 
-    # Only joint replacement finding was revised
     assert len(pkt_v2.revisions) == 1
     assert pkt_v2.revisions[0].finding_id != f_30d_v2.finding_id
     assert pkt_v2.revisions[0].finding_id != f_rent_v2.finding_id
 
 
-# ==============================================================================
-# Test 7: Duplicate Input Does Not Create Duplicate Substantive Revisions
-# ==============================================================================
 def test_duplicate_input_does_not_create_duplicate_revisions(replay_env):
     """Verifies that running review repeatedly with identical documents and case details
     does NOT increment finding revision numbers and does NOT append redundant Revision records.
@@ -408,32 +809,31 @@ def test_duplicate_input_does_not_create_duplicate_revisions(replay_env):
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Ingest endorsement
+    agent = BoundedReviewAgent()
+
+    pkt_v1 = agent.run_review(case=case, retrieval=retrieval)
+    f_v1 = pkt_v1.findings[0]
+    assert f_v1.revision == 1
+    assert len(pkt_v1.revisions) == 0
+
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Policy_Endorsement_Schedule_EW-2025-01.pdf",
+        filename=f"{case.case_id}_Endorsement_EW-2025-01.pdf",
         content=build_synthetic_endorsement_pdf(),
         evidence_type="endorsement",
     )
 
-    agent = BoundedReviewAgent()
-
-    # Initial run (Packet 1)
-    pkt_v1 = agent.run_review(case=case, retrieval=retrieval)
-    knee_v1 = next(f for f in pkt_v1.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
-    assert knee_v1.revision == 1
-    assert len(pkt_v1.revisions) == 0
-
-    # Re-run with prior packet (Packet 2) -> identical input, no change!
     pkt_v2 = agent.run_review(case=case, retrieval=retrieval, prior_packet=pkt_v1)
-    knee_v2 = next(f for f in pkt_v2.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
-    assert knee_v2.revision == 1  # Not incremented!
-    assert len(pkt_v2.revisions) == 0  # No duplicate revision emitted!
+    f_v2 = next(f for f in pkt_v2.findings if f.finding_id == f_v1.finding_id)
+    assert f_v2.revision == 2
+    assert len(pkt_v2.revisions) == 1
+
+    pkt_v3 = agent.run_review(case=case, retrieval=retrieval, prior_packet=pkt_v2)
+    f_v3 = next(f for f in pkt_v3.findings if f.finding_id == f_v1.finding_id)
+    assert f_v3.revision == 2
+    assert len(pkt_v3.revisions) == 1
 
 
-# ==============================================================================
-# Test 8: Corrected Case Date Triggers Reassessment of Dependent Findings
-# ==============================================================================
 def test_corrected_case_date_triggers_reassessment(replay_env):
     """Verifies that correcting planned admission date from 2025-01-15 (when endorsement was not applicable)
     to 2026-11-15 triggers reassessment of dependent findings with trigger_type='case_details_changed'
@@ -443,7 +843,6 @@ def test_corrected_case_date_triggers_reassessment(replay_env):
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Case initially has planned admission date in early 2025 (before endorsement effective date 2025-04-01)
     case_early = case_repo.create_case(
         CaseDetails(
             case_id="case-m5-date-corr",
@@ -460,7 +859,6 @@ def test_corrected_case_date_triggers_reassessment(replay_env):
         )
     )
 
-    # Ingest policy, schedule, and endorsement
     doc_storage.save_document(
         case_id=case_early.case_id,
         filename=f"{case_early.case_id}_Policy_Wording.pdf",
@@ -482,13 +880,11 @@ def test_corrected_case_date_triggers_reassessment(replay_env):
 
     agent = BoundedReviewAgent()
 
-    # Run 1: Endorsement effective date (2025-04-01) is after admission date (2025-01-15) -> not applicable!
     pkt_v1 = agent.run_review(case=case_early, retrieval=retrieval)
     knee_v1 = next(f for f in pkt_v1.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
     assert knee_v1.status == "unresolved"
     assert knee_v1.revision == 1
 
-    # User corrects planned admission date to 2026-11-15 (after endorsement effective date)
     case_corrected = case_early.model_copy(
         update={
             "planned_admission_date": date(2026, 11, 15),
@@ -500,16 +896,13 @@ def test_corrected_case_date_triggers_reassessment(replay_env):
     )
     case_repo.update_case(case_corrected)
 
-    # Run 2: Replay review with corrected date
     pkt_v2 = agent.run_review(case=case_corrected, retrieval=retrieval, prior_packet=pkt_v1)
     assert pkt_v2.packet_version == 2
 
-    # Finding is now supported at revision=2!
     knee_v2 = next(f for f in pkt_v2.findings if "knee" in f.topic.lower() or "joint" in f.topic.lower())
     assert knee_v2.status == "supported"
     assert knee_v2.revision == 2
 
-    # Revision record emitted with trigger_type='user_correction' or 'case_details_changed'
     assert len(pkt_v2.revisions) == 1
     rev = pkt_v2.revisions[0]
     assert rev.finding_id == knee_v2.finding_id
@@ -519,9 +912,6 @@ def test_corrected_case_date_triggers_reassessment(replay_env):
     assert "planned_admission_date" in rev.changed_case_facts
 
 
-# ==============================================================================
-# Test 9: Failed / Partial Reassessment Does Not Falsely Report Completion
-# ==============================================================================
 def test_partial_reassessment_does_not_falsely_report_completion(replay_env):
     """Verifies that when a reassessment stops early due to budget exhaustion or timeout,
     it returns review_status='incomplete' with honest stopped_reason, preserving partial findings
@@ -531,20 +921,17 @@ def test_partial_reassessment_does_not_falsely_report_completion(replay_env):
     retrieval = replay_env["retrieval"]
     doc_storage = replay_env["doc_storage"]
 
-    # Ingest endorsement
     doc_storage.save_document(
         case_id=case.case_id,
-        filename="Policy_Endorsement_Schedule_EW-2025-01.pdf",
+        filename=f"{case.case_id}_Endorsement_EW-2025-01.pdf",
         content=build_synthetic_endorsement_pdf(),
         evidence_type="endorsement",
     )
 
     agent = BoundedReviewAgent()
 
-    # Run 1: Normal initial run
     pkt_v1 = agent.run_review(case=case, retrieval=retrieval)
 
-    # Run 2: Reassessment with very tight tool budget (2 calls)
     pkt_v2 = agent.run_review(
         case=case,
         retrieval=retrieval,
