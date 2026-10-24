@@ -1,0 +1,152 @@
+{
+  "packet_id": "pkt-fixture-supported-002",
+  "packet_version": 1,
+  "run_id": "run-fixture-002",
+  "generated_at": "2026-10-24T11:00:00Z",
+  "case": {
+    "case_id": "case-fixture-002",
+    "member_name": "Sunita Patel",
+    "policy_id": "POL-9941-STAR",
+    "policy_start_date": "2023-06-01",
+    "continuous_coverage_start_date": "2023-06-01",
+    "planned_admission_date": "2026-10-30",
+    "policy_age_months": 40,
+    "procedure": "Cataract Surgery with Phacoemulsification",
+    "hospital_name": "Apex Eye Institute",
+    "estimated_cost": "45000.00",
+    "currency": "INR",
+    "fact_sources": {
+      "member_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_id": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "planned_admission_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "procedure": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "hospital_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_start_date": {
+        "source_type": "document",
+        "evidence": [
+          {
+            "document_id": "doc-schedule-9941",
+            "document_version": "v1",
+            "page": 1,
+            "quote": "Policy Inception Date: 01-Jun-2023. Continuous Coverage Date: 01-Jun-2023.",
+            "evidence_type": "policy_schedule"
+          }
+        ],
+        "explanation": null
+      },
+      "continuous_coverage_start_date": {
+        "source_type": "document",
+        "evidence": [
+          {
+            "document_id": "doc-schedule-9941",
+            "document_version": "v1",
+            "page": 1,
+            "quote": "Policy Inception Date: 01-Jun-2023. Continuous Coverage Date: 01-Jun-2023.",
+            "evidence_type": "policy_schedule"
+          }
+        ],
+        "explanation": null
+      },
+      "policy_age_months": {
+        "source_type": "derived",
+        "evidence": [],
+        "explanation": "Calculated from continuous coverage start date (2023-06-01) to planned admission (2026-10-30), giving 40 full months."
+      },
+      "estimated_cost": {
+        "source_type": "document",
+        "evidence": [
+          {
+            "document_id": "doc-estimate-apex",
+            "document_version": "v1",
+            "page": 1,
+            "quote": "Total Estimated Procedure Cost for Phacoemulsification with Foldable IOL: INR 45,000.",
+            "evidence_type": "hospital_estimate"
+          }
+        ],
+        "explanation": null
+      }
+    }
+  },
+  "review_status": "complete",
+  "findings": [
+    {
+      "finding_id": "find-cataract-waiting-period",
+      "revision": 1,
+      "topic": "Specific Disease Waiting Period (Cataract)",
+      "status": "supported",
+      "conclusion": "The 24-month specific disease waiting period for cataract surgery is satisfied based on 40 months of continuous coverage verified from policy schedule doc-schedule-9941 (p. 1).",
+      "evidence": [
+        {
+          "document_id": "doc-base-policy-star",
+          "document_version": "v1",
+          "page": 14,
+          "quote": "Clause 4.3 (Specific Ailment Waiting Period): Expenses related to the treatment of Cataract are covered after twenty-four (24) months of continuous coverage.",
+          "evidence_type": "policy_wording"
+        }
+      ],
+      "relevant_case_facts": [
+        "procedure",
+        "continuous_coverage_start_date",
+        "policy_age_months"
+      ],
+      "missing_facts": [],
+      "limitations": [
+        "Sub-limits of INR 40,000 per eye apply under Clause 5.2. Hospital estimate is INR 45,000, leaving a potential INR 5,000 out-of-pocket difference."
+      ],
+      "next_action": "Clarify lens model and package inclusions with hospital admission desk to check out-of-pocket costs exceeding the INR 40,000 sub-limit.",
+      "created_at": "2026-10-24T11:02:00Z"
+    }
+  ],
+  "revisions": [],
+  "document_applicability": [
+    {
+      "document_id": "doc-base-policy-star",
+      "document_version": "v1",
+      "policy_id": "POL-9941-STAR",
+      "member_name": "Sunita Patel",
+      "issued_on": null,
+      "effective_from": null,
+      "effective_to": null,
+      "modified_topics": [],
+      "status": "applicable",
+      "evidence": [
+        {
+          "document_id": "doc-base-policy-star",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Master Policy Wording for Star Comprehensive Health Plan applicable to all schedules referencing Form STAR-COMP-2023.",
+          "evidence_type": "policy_wording"
+        }
+      ],
+      "reason": "Master policy terms apply to Star Health Plan POL-9941-STAR."
+    }
+  ],
+  "missing_evidence_checklist": [],
+  "unresolved_questions": [],
+  "authorization_status": "not verified",
+  "authorization_evidence": [],
+  "tool_steps_used": 3,
+  "stopped_reason": "review_complete",
+  "stop_details": null,
+  "_comment": "DEVELOPMENT FIXTURE ONLY - DOES NOT REPRESENT ACTUAL AGENT RUN"
+}

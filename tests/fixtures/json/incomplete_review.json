@@ -1,0 +1,125 @@
+{
+  "packet_id": "pkt-fixture-incomplete-001",
+  "packet_version": 1,
+  "run_id": "run-fixture-001",
+  "generated_at": "2026-10-24T10:00:00Z",
+  "case": {
+    "case_id": "case-fixture-001",
+    "member_name": "Aarav Sharma",
+    "policy_id": "POL-7026-MED",
+    "policy_start_date": null,
+    "continuous_coverage_start_date": null,
+    "planned_admission_date": "2026-11-15",
+    "policy_age_months": null,
+    "procedure": "Inguinal Hernia Repair",
+    "hospital_name": "City Care Hospital",
+    "estimated_cost": null,
+    "currency": "INR",
+    "fact_sources": {
+      "member_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_id": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "procedure": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "planned_admission_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "hospital_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      }
+    }
+  },
+  "review_status": "incomplete",
+  "findings": [
+    {
+      "finding_id": "find-waiting-period-hernia",
+      "revision": 1,
+      "topic": "Specific Condition Waiting Period (Hernia)",
+      "status": "unresolved",
+      "conclusion": "Hernia surgery has a 24-month specific waiting period under Section 4.2. Because policy inception date or continuous coverage start date is not documented, waiting period compliance cannot be determined.",
+      "evidence": [
+        {
+          "document_id": "doc-base-policy-001",
+          "document_version": "v1",
+          "page": 8,
+          "quote": "Section 4.2: A waiting period of twenty-four (24) consecutive months of continuous coverage shall apply to the treatment of all types of Hernia, Hydrocele, and Piles.",
+          "evidence_type": "policy_wording"
+        }
+      ],
+      "relevant_case_facts": [
+        "procedure",
+        "policy_id"
+      ],
+      "missing_facts": [
+        "continuous_coverage_start_date",
+        "policy_start_date"
+      ],
+      "limitations": [
+        "User has not provided inception date or prior continuous coverage certificate.",
+        "Base policy terms confirm the 24-month waiting rule, but elapsed duration remains unknown."
+      ],
+      "next_action": "Obtain prior insurance policy schedules or continuity certificate to prove elapsed coverage.",
+      "created_at": "2026-10-24T10:01:00Z"
+    }
+  ],
+  "revisions": [],
+  "document_applicability": [
+    {
+      "document_id": "doc-base-policy-001",
+      "document_version": "v1",
+      "policy_id": "POL-7026-MED",
+      "member_name": null,
+      "issued_on": null,
+      "effective_from": null,
+      "effective_to": null,
+      "modified_topics": [],
+      "status": "applicable",
+      "evidence": [
+        {
+          "document_id": "doc-base-policy-001",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Health Shield Policy Schedule: Policy Number POL-7026-MED issued to Aarav Sharma.",
+          "evidence_type": "policy_schedule"
+        }
+      ],
+      "reason": "Policy schedule matches policy ID POL-7026-MED."
+    }
+  ],
+  "missing_evidence_checklist": [
+    {
+      "item_id": "chk-hernia-coverage-dates",
+      "related_finding_ids": [
+        "find-waiting-period-hernia"
+      ],
+      "requested_information": "Continuous coverage certificate or previous policy renewal schedule",
+      "why_it_matters": "Section 4.2 imposes a 24-month waiting period for hernia surgery. Evidence of continuous coverage from prior renewals or porting is needed to verify eligibility.",
+      "suggested_source": "Insurance policy schedule, renewal certificate, or broker portal",
+      "status": "requested",
+      "resolution_note": null
+    }
+  ],
+  "unresolved_questions": [
+    "When was policy POL-7026-MED originally issued, or what was the continuous coverage inception date?"
+  ],
+  "authorization_status": "not verified",
+  "authorization_evidence": [],
+  "tool_steps_used": 2,
+  "stopped_reason": "missing_information",
+  "stop_details": "Awaiting continuous coverage inception date to determine 24-month hernia waiting period satisfaction.",
+  "_comment": "DEVELOPMENT FIXTURE ONLY - DOES NOT REPRESENT ACTUAL AGENT RUN"
+}

@@ -149,9 +149,23 @@ class EvidenceRetrieval(Protocol):
         Returns (is_valid, reason).
         """
         ...
+
+    def search_pages(
+        self,
+        case_id: str,
+        query: str,
+        document_id: str | None = None,
+        max_results: int = 5,
+    ) -> list[tuple[str, str, int, str]]:
+        """
+        Search extracted page text across documents for a case.
+        Returns list of (document_id, version, page_number, matching_snippet).
+        Required because bounded agent (8-call limit) cannot linearly scan all pages.
+        """
+        ...
 ```
 
-### 2.5 Review Persistence & Atomic Revisions (PROPOSED)
+### 2.5 Review Persistence & Atomic Revisions (AGREED)
 ```python
 class ReviewRepository(Protocol):
     def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket:
@@ -179,7 +193,117 @@ class ReviewRepository(Protocol):
 
 ---
 
-## 3. ID Assignment & Ownership Matrix
+## 3. Proposed Agent & Review Interfaces (PROPOSED)
+
+Owner B proposes the following agent, review runner, event telemetry, hospital reference, and replay interfaces for implementation in M2-B, M3-B, M4-B, and M5-B.
+
+### 3.1 Inputs Supplied by Storage / Extraction
+The review engine operates on domain models and retrieval protocols supplied by Owner A:
+1. `CaseDetails`: Validated case attributes with provenance (`fact_sources`).
+2. `EvidenceRetrieval`: Service providing `get_page_text`, `search_pages`, and `verify_citation`.
+3. `DocumentRecord` list: Available active documents, their versions, and extraction statuses.
+4. `HospitalDataset`: Dated, versioned local synthetic hospital data (for M6).
+
+### 3.2 Review Engine Runner Interface
+```python
+from typing import Callable
+from admitsense.schemas import CaseDetails, ReviewPacket
+
+class ReviewRunner(Protocol):
+    def run_review(
+        self,
+        case: CaseDetails,
+        retrieval: EvidenceRetrieval,
+        prior_packet: ReviewPacket | None = None,
+        tool_budget: int = 8,
+        timeout_seconds: float = 30.0,
+        event_callback: Callable[[ToolActivityEvent], None] | None = None,
+    ) -> ReviewPacket:
+        """
+        Executes bounded agent analysis:
+        1. Evaluates case facts and retrieves relevant policy/endorsement pages.
+        2. Validates evidence citations against actual physical page text.
+        3. Generates supported, unresolved, or conflict findings.
+        4. Enforces strict <= 8 tool calls; terminates gracefully on budget or timeout.
+        5. If prior_packet is provided, triggers Evidence Change Replay computation.
+        6. Returns pure Pydantic ReviewPacket; does NOT write directly to SQLite.
+        """
+        ...
+```
+
+### 3.3 Tool Activity Events & Streamlit Telemetry (PROPOSED)
+Owner A's Streamlit workspace displays real-time agent activity via the following event schema:
+```python
+from datetime import datetime
+from typing import Any, Literal
+from pydantic import BaseModel, Field
+
+class ToolActivityEvent(BaseModel):
+    run_id: str
+    step_number: int = Field(ge=1, le=8, description="1-based tool call step (max 8)")
+    tool_name: Literal[
+        "search_pages",
+        "read_page",
+        "verify_citation",
+        "lookup_hospital",
+    ]
+    tool_arguments: dict[str, Any]
+    status: Literal["invoked", "completed", "failed"]
+    summary: str = Field(description="Caregiver-friendly action summary")
+    error: str | None = None
+    timestamp: datetime
+```
+
+### 3.4 Synthetic Hospital Record Schema (PROPOSED)
+Hospital reference data is strictly separate from PDF citations and contains explicit dataset versions and dates:
+```python
+from datetime import date
+from typing import Literal
+from pydantic import BaseModel, Field
+
+class HospitalRecordReference(BaseModel):
+    record_id: str = Field(description="Unique synthetic record ID, e.g. hosp-synth-001")
+    dataset_version: str = Field(description="Synthetic dataset version, e.g. v2026.1")
+    dataset_date: date = Field(description="Publication date of synthetic dataset")
+    hospital_name: str
+    city: str
+    network_tier: Literal["tier_1", "tier_2", "non_network", "unspecified"] = "unspecified"
+    tpa_desk_contact: str | None = None
+    limitations: list[str] = Field(
+        default_factory=lambda: [
+            "Synthetic hospital data for demonstration only.",
+            "Does not establish current insurer network agreement or cashless guarantee."
+        ]
+    )
+```
+
+### 3.5 Evidence Change Replay Computation (PROPOSED)
+```python
+def compute_evidence_replay(
+    prior_packet: ReviewPacket,
+    new_findings: list[Finding],
+    trigger_type: Literal["new_document", "user_correction", "case_details_changed"],
+    triggering_evidence: list[Evidence] = [],
+    changed_case_facts: list[CaseFactName] = [],
+    reason: str = "",
+) -> tuple[list[Finding], list[Revision]]:
+    """
+    Computes delta between prior_packet findings and new findings:
+    1. If a finding conclusion or status changes, increments revision by exactly 1.
+    2. Emits a Revision audit record with old/new status, conclusion, and triggering evidence.
+    3. Leaves unchanged findings at their prior revision number.
+    4. Returns (updated_current_findings, accumulated_revisions).
+    """
+    ...
+```
+
+### 3.6 Persistence Boundaries & Separation of Concerns
+- **Owner B (Agent / Review)**: Pure deterministic & LLM logic. Generates and validates `ReviewPacket`, `Finding`, `Revision`, and `ToolActivityEvent`. Does not write to SQLite or disk directly.
+- **Owner A (Storage / UI)**: Invokes `ReviewRunner.run_review`, streams `ToolActivityEvent` to the Streamlit UI, and commits the resulting `ReviewPacket` to SQLite via `ReviewRepository.save_review_packet`.
+
+---
+
+## 4. ID Assignment & Ownership Matrix
 
 | Entity | ID Format Example | Assigned By | Stored By | Invariant Rule |
 |---|---|---|---|---|
@@ -193,10 +317,11 @@ class ReviewRepository(Protocol):
 | **Checklist Item** | `chk-waiting-period` | Owner B (Review Engine) | SQLite `checklist_items` | Links to `finding_id`. |
 | **Packet** | `pkt-20261023-001` | Owner B (Review Engine) | SQLite `review_packets` | Preserved as immutable snapshot. |
 | **Run** | `run-20261023-001` | Owner B (Agent Runner) | SQLite `review_packets` | Identifies single bounded execution. |
+| **Hospital Record** | `hosp-synth-001` | Owner B (Dataset Author) | JSON / SQLite | Dated, versioned synthetic hospital ID. |
 
 ---
 
-## 4. Error States & Handling
+## 5. Error States & Handling
 
 1. **Extraction Failures**:
    - Status set to `"unreadable"` or `"error"`.
@@ -210,3 +335,6 @@ class ReviewRepository(Protocol):
      - Set `stopped_reason = "tool_limit_reached"` or `"timeout"`.
      - Set `review_status = "incomplete"`.
      - Persist validated partial findings. Do not raise unhandled exception to UI.
+4. **Validation Failures in Review Engine**:
+   - If a candidate finding fails Pydantic schema validation, quarantine it as `"needs_human_review"` rather than crashing the overall review run.
+

@@ -1,0 +1,166 @@
+{
+  "packet_id": "pkt-fixture-revised-004",
+  "packet_version": 2,
+  "run_id": "run-fixture-004",
+  "generated_at": "2026-10-24T14:00:00Z",
+  "case": {
+    "case_id": "case-fixture-004",
+    "member_name": "Pooja Rao",
+    "policy_id": "POL-5501-GOLD",
+    "policy_start_date": "2025-01-10",
+    "continuous_coverage_start_date": "2025-01-10",
+    "planned_admission_date": "2026-10-25",
+    "policy_age_months": 21,
+    "procedure": "Normal Delivery / Maternity Inpatient Care",
+    "hospital_name": "Motherhood Hospital",
+    "estimated_cost": null,
+    "currency": "INR",
+    "fact_sources": {
+      "member_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_id": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "planned_admission_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "procedure": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "hospital_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_start_date": {
+        "source_type": "document",
+        "evidence": [
+          {
+            "document_id": "doc-schedule-5501",
+            "document_version": "v1",
+            "page": 1,
+            "quote": "Schedule Issue Date: 10-Jan-2025. Policy Commencement: 10-Jan-2025.",
+            "evidence_type": "policy_schedule"
+          }
+        ],
+        "explanation": null
+      },
+      "continuous_coverage_start_date": {
+        "source_type": "document",
+        "evidence": [
+          {
+            "document_id": "doc-schedule-5501",
+            "document_version": "v1",
+            "page": 1,
+            "quote": "Schedule Issue Date: 10-Jan-2025. Policy Commencement: 10-Jan-2025.",
+            "evidence_type": "policy_schedule"
+          }
+        ],
+        "explanation": null
+      },
+      "policy_age_months": {
+        "source_type": "derived",
+        "evidence": [],
+        "explanation": "Elapsed duration is 21 months between 2025-01-10 and 2026-10-25."
+      }
+    }
+  },
+  "review_status": "complete",
+  "findings": [
+    {
+      "finding_id": "find-maternity-coverage",
+      "revision": 2,
+      "topic": "Maternity Coverage & Waiting Period",
+      "status": "supported",
+      "conclusion": "Maternity care covered up to INR 50,000 with 9-month waiting period satisfied (21 months continuous coverage elapsed) under Maternity Rider Schedule (doc-maternity-rider-v1, p. 2).",
+      "evidence": [
+        {
+          "document_id": "doc-maternity-rider-v1",
+          "document_version": "v1",
+          "page": 2,
+          "quote": "Section 2.1: Inpatient maternity expenses are covered up to INR 50,000 per delivery after nine (9) months of continuous coverage under this rider.",
+          "evidence_type": "endorsement"
+        }
+      ],
+      "relevant_case_facts": [
+        "procedure",
+        "continuous_coverage_start_date",
+        "policy_age_months"
+      ],
+      "missing_facts": [],
+      "limitations": [
+        "Benefit is subject to a strict INR 50,000 sub-limit. Hospital expenses exceeding INR 50,000 must be borne out-of-pocket."
+      ],
+      "next_action": "Request itemized room rent and delivery estimate from Motherhood Hospital to verify charges against the INR 50,000 rider limit.",
+      "created_at": "2026-10-24T14:02:00Z"
+    }
+  ],
+  "revisions": [
+    {
+      "revision_id": "rev-20261024-001",
+      "finding_id": "find-maternity-coverage",
+      "old_finding_revision": 1,
+      "new_finding_revision": 2,
+      "old_conclusion": "Maternity coverage unresolved: General Exclusion 6.1 in base policy excludes all pregnancy and childbirth expenses.",
+      "new_conclusion": "Maternity care covered up to INR 50,000 with 9-month waiting period satisfied (21 months continuous coverage elapsed) under Maternity Rider Schedule (doc-maternity-rider-v1, p. 2).",
+      "old_status": "unresolved",
+      "new_status": "supported",
+      "trigger_type": "new_document",
+      "triggering_evidence": [
+        {
+          "document_id": "doc-maternity-rider-v1",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Gold Health Policy Maternity Rider Schedule: Attached to Policy POL-5501-GOLD for Pooja Rao.",
+          "evidence_type": "endorsement"
+        }
+      ],
+      "changed_case_facts": [],
+      "reason": "Uploaded Maternity Rider endorsement v1 amends General Exclusion Section 6.1 and confirms active maternity benefit.",
+      "affected_topics": [
+        "Maternity Coverage & Waiting Period"
+      ],
+      "created_at": "2026-10-24T14:02:00Z"
+    }
+  ],
+  "document_applicability": [
+    {
+      "document_id": "doc-maternity-rider-v1",
+      "document_version": "v1",
+      "policy_id": "POL-5501-GOLD",
+      "member_name": "Pooja Rao",
+      "issued_on": null,
+      "effective_from": "2025-01-10",
+      "effective_to": null,
+      "modified_topics": [],
+      "status": "applicable",
+      "evidence": [
+        {
+          "document_id": "doc-maternity-rider-v1",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Gold Health Policy Maternity Rider Schedule: Attached to Policy POL-5501-GOLD for Pooja Rao.",
+          "evidence_type": "endorsement"
+        }
+      ],
+      "reason": "Maternity Rider active and linked to Gold Policy POL-5501-GOLD."
+    }
+  ],
+  "missing_evidence_checklist": [],
+  "unresolved_questions": [],
+  "authorization_status": "not verified",
+  "authorization_evidence": [],
+  "tool_steps_used": 5,
+  "stopped_reason": "review_complete",
+  "stop_details": null,
+  "_comment": "DEVELOPMENT FIXTURE ONLY - DOES NOT REPRESENT ACTUAL AGENT RUN"
+}

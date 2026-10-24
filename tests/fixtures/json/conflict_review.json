@@ -1,0 +1,118 @@
+{
+  "packet_id": "pkt-fixture-conflict-003",
+  "packet_version": 1,
+  "run_id": "run-fixture-003",
+  "generated_at": "2026-10-24T12:00:00Z",
+  "case": {
+    "case_id": "case-fixture-003",
+    "member_name": "Devendra Verma",
+    "policy_id": "POL-8812-SILVER",
+    "policy_start_date": null,
+    "continuous_coverage_start_date": null,
+    "planned_admission_date": "2026-10-28",
+    "policy_age_months": null,
+    "procedure": "Total Knee Replacement",
+    "hospital_name": "Metro Specialty Hospital",
+    "estimated_cost": null,
+    "currency": "INR",
+    "fact_sources": {
+      "member_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_id": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "planned_admission_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "procedure": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "hospital_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      }
+    }
+  },
+  "review_status": "incomplete",
+  "findings": [
+    {
+      "finding_id": "find-knee-waiting-period",
+      "revision": 1,
+      "topic": "Joint Replacement Waiting Period",
+      "status": "conflict",
+      "conclusion": "Conflicting waiting period terms: Base policy Section 4.4 requires 48 months (doc-base-policy-silver, p. 16), whereas Endorsement END-2026-04 reduces this to 24 months (doc-endorsement-2026-v1, p. 1). However, the endorsement's stated effective date is 01-Nov-2026, post-dating planned admission on 28-Oct-2026.",
+      "evidence": [
+        {
+          "document_id": "doc-base-policy-silver",
+          "document_version": "v1",
+          "page": 16,
+          "quote": "Section 4.4: Joint replacement surgeries shall be subject to a waiting period of forty-eight (48) consecutive months of continuous coverage.",
+          "evidence_type": "policy_wording"
+        },
+        {
+          "document_id": "doc-endorsement-2026-v1",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Endorsement No. END-2026-04: Effective from 01-Nov-2026, Section 4.4 waiting period is amended to twenty-four (24) months.",
+          "evidence_type": "endorsement"
+        }
+      ],
+      "relevant_case_facts": [
+        "procedure",
+        "planned_admission_date",
+        "policy_id"
+      ],
+      "missing_facts": [],
+      "limitations": [
+        "Cannot automatically apply newer endorsement because effective date succeeds planned admission date.",
+        "Requires insurer confirmation whether endorsement grace applies."
+      ],
+      "next_action": "Contact insurer helpline or desk to clarify if 24-month endorsement rule applies to an admission 4 days before endorsement effective date.",
+      "created_at": "2026-10-24T12:02:00Z"
+    }
+  ],
+  "revisions": [],
+  "document_applicability": [
+    {
+      "document_id": "doc-endorsement-2026-v1",
+      "document_version": "v1",
+      "policy_id": "POL-8812-SILVER",
+      "member_name": null,
+      "issued_on": null,
+      "effective_from": "2026-11-01",
+      "effective_to": null,
+      "modified_topics": [],
+      "status": "uncertain",
+      "evidence": [
+        {
+          "document_id": "doc-endorsement-2026-v1",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Endorsement No. END-2026-04: Effective from 01-Nov-2026, Section 4.4 waiting period is amended to twenty-four (24) months.",
+          "evidence_type": "endorsement"
+        }
+      ],
+      "reason": "Endorsement END-2026-04 amends joint replacement waiting periods to 24 months, but effective date is 01-Nov-2026, which is after planned admission date 28-Oct-2026. Precedence and applicability for late October admission are uncertain."
+    }
+  ],
+  "missing_evidence_checklist": [],
+  "unresolved_questions": [
+    "Does Endorsement END-2026-04 apply to an admission on 2026-10-28 when its stated effective date is 2026-11-01?"
+  ],
+  "authorization_status": "not verified",
+  "authorization_evidence": [],
+  "tool_steps_used": 4,
+  "stopped_reason": "conflicting_evidence",
+  "stop_details": "Contradictory waiting period terms between base policy and post-dated endorsement.",
+  "_comment": "DEVELOPMENT FIXTURE ONLY - DOES NOT REPRESENT ACTUAL AGENT RUN"
+}
