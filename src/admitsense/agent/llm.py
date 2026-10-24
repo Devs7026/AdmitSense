@@ -25,6 +25,12 @@ except ImportError:
     Groq = None  # type: ignore
     GROQ_AVAILABLE = False
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 ENV_GROQ_API_KEY = "GROQ_API_KEY"

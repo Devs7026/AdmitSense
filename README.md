@@ -62,11 +62,12 @@ AdmitSense operates out-of-the-box with local SQLite and built-in synthetic fixt
 
 | Variable Name | Description | Default Value |
 |---|---|---|
+| `GROQ_API_KEY` | API key for Groq LLM integration (from console.groq.com) | None (runs transparent deterministic fallback) |
+| `GROQ_MODEL` | Groq model identifier | `llama-3.3-70b-versatile` |
 | `ADMITSENSE_DB_PATH` | Path to the SQLite database file | `data/admitsense.db` |
 | `ADMITSENSE_DOCS_DIR` | Directory storing uploaded PDF files | `data/documents` |
 | `ADMITSENSE_HOSPITALS_PATH` | Path to dated synthetic hospital directory JSON | `data/hospitals/synthetic_hospitals.json` |
 | `ADMITSENSE_PORT` | Port for the Streamlit web application | `8501` |
-| `AGENT_MODEL` | Identifier for the LLM model (e.g. `gemini-2.0-flash`) | Local Bounded Agent |
 | `AGENT_TOOL_BUDGET` | Maximum tool invocations per review run | `8` |
 | `AGENT_TIMEOUT_SECONDS` | Maximum seconds allowed per review run | `30.0` |
 
