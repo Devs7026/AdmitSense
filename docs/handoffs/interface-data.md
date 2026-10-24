@@ -1,7 +1,7 @@
 Updated: 2026-10-24T12:25:00+05:30
 Owner / task: OWNER A / M3-A (Interface side of M3-I prepared)
-Branch / implementation commit or PR: feat/m3-review-workspace
-Delivery state: ready-for-review
+Branch / implementation commit or PR: main (merge commit 3c87815)
+Delivery state: integrated
 Implemented:
 - SQLite persistence layer for review outputs in `src/admitsense/storage/review_repository.py`:
   - `save_review_packet(packet)`: atomic transaction saving packet metadata, raw serialized JSON snapshot (for future M6 deterministic exports), findings, revisions, and checklist items.
