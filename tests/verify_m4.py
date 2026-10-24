@@ -297,10 +297,30 @@ def run_m4_verification():
             runner=agent,
         )
 
+        case_v01 = case_repo.create_case(
+            CaseDetails(
+                case_id="case-m4-v01",
+                member_name="Ramesh Sharma",
+                procedure="Total Knee Replacement",
+                policy_age_months=18,
+                fact_sources={
+                    "member_name": FactSource(source_type="user_provided"),
+                    "procedure": FactSource(source_type="user_provided"),
+                    "policy_age_months": FactSource(source_type="user_provided"),
+                },
+            )
+        )
+        doc_storage.save_document(
+            case_id=case_v01.case_id,
+            filename="Care_Gold_Policy.pdf",
+            content=build_synthetic_policy_pdf(),
+            evidence_type="policy_wording",
+        )
+
         print("[Check 9] Tool activity persistence in SQLite...")
         streamed_events = []
         svc_packet_v1 = review_service.execute_review(
-            case_id=base_case.case_id,
+            case_id=case_v01.case_id,
             event_callback=lambda evt: streamed_events.append(evt),
         )
         assert len(streamed_events) > 0
@@ -318,14 +338,14 @@ def run_m4_verification():
         print(f"  [PASS] Honest status='{svc_packet_v1.review_status}', reason='{svc_packet_v1.stopped_reason}', partial findings preserved.")
 
         print("[Check 11] User answers missing facts with FactSource provenance...")
-        updated_case = base_case.model_copy()
+        updated_case = case_v01.model_copy()
         updated_case.continuous_coverage_start_date = date(2024, 1, 1)
         updated_case.policy_age_months = 24
         updated_case.fact_sources["continuous_coverage_start_date"] = FactSource(source_type="user_provided")
         updated_case.fact_sources["policy_age_months"] = FactSource(source_type="user_provided")
         case_repo.update_case(updated_case)
 
-        reloaded_case = case_repo.get_case(base_case.case_id)
+        reloaded_case = case_repo.get_case(case_v01.case_id)
         assert reloaded_case.continuous_coverage_start_date == date(2024, 1, 1)
         assert reloaded_case.fact_sources["continuous_coverage_start_date"].source_type == "user_provided"
         print("  [PASS] Follow-up facts saved in SQLite with user_provided provenance.")
@@ -369,12 +389,12 @@ def run_m4_verification():
         print("  [PASS] 'user_does_not_have' survived simulated application restart.")
 
         print("[Check 13] Resumed review creates explicit new run and retains historical records...")
-        c1_pkt2 = review_service.execute_review(base_case.case_id)
+        c1_pkt2 = review_service.execute_review(case_v01.case_id)
         assert c1_pkt2.packet_version == 2
         assert c1_pkt2.run_id != svc_packet_v1.run_id
         assert c1_pkt2.review_status == "complete"
         assert c1_pkt2.findings[0].status == "supported"
-        history = review_repo.list_review_packets(base_case.case_id)
+        history = review_repo.list_review_packets(case_v01.case_id)
         assert len(history) == 2
         print(f"  [PASS] Resumed review created version {c1_pkt2.packet_version} with new Run ID: {c1_pkt2.run_id}. History preserved.")
 

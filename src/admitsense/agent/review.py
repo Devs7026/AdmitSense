@@ -1007,7 +1007,7 @@ class BoundedReviewAgent:
             review_status = "incomplete"
             stop_details = "Unreadable scanned documents prevent complete verification of policy terms."
 
-        elif tool_steps_used >= budget:
+        elif tool_steps_used >= budget and not all(f.status == "supported" for f in findings):
             stopped_reason = "tool_limit_reached"
             review_status = "incomplete"
             stop_details = f"Tool execution budget limit of {budget} calls reached. Validated partial findings preserved."
