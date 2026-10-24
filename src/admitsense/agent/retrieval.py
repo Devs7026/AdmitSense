@@ -8,48 +8,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from admitsense.schemas import Evidence, EvidenceType
 
-ExtractionStatus = Literal[
-    "pending",
-    "extracted",
-    "partial",
-    "unreadable",
-    "error",
+from admitsense.documents.models import DocumentRecord, ExtractedPage, ExtractionStatus
+from admitsense.schemas import Evidence, EvidenceType
+from admitsense.storage.database import Database
+
+__all__ = [
+    "DocumentRecord",
+    "ExtractedPage",
+    "ExtractionStatus",
+    "RetrievalError",
+    "DocumentNotFoundError",
+    "CaseOwnershipError",
+    "VersionMismatchError",
+    "PageOutOfBoundsError",
+    "DocumentUnreadableError",
+    "normalize_whitespace",
+    "PageSearchResult",
+    "CitationVerificationResult",
+    "EvidenceRetrievalService",
 ]
-
-
-class ExtractedPage(BaseModel):
-    """An individual extracted PDF page with physical 1-based indexing."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    page_number: int = Field(gt=0, description="1-based physical PDF page number")
-    text: str = Field(description="Extracted raw text with normalized whitespace")
-    is_blank: bool = False
-    character_count: int = Field(default=0, ge=0)
-
-    def model_post_init(self, __context: Any) -> None:
-        if self.character_count == 0 and self.text:
-            self.character_count = len(self.text)
-        if not self.text.strip():
-            self.is_blank = True
-
-
-class DocumentRecord(BaseModel):
-    """Immutable document record with hashed version and extracted pages."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    document_id: str
-    case_id: str
-    filename: str
-    version: str = "v1"
-    sha256: str
-    evidence_type: str = "other"
-    uploaded_at: str
-    extraction_status: ExtractionStatus = "extracted"
-    total_pages: int = Field(ge=0)
-    pages: list[ExtractedPage] = Field(default_factory=list)
-    error_message: str | None = None
 
 
 class RetrievalError(Exception):
@@ -162,12 +139,63 @@ class EvidenceRetrievalService:
     whitespace normalization, and explicit failures for fabricated quotes.
     """
 
-    def __init__(self, initial_documents: list[DocumentRecord] | None = None) -> None:
+    def __init__(
+        self,
+        initial_documents: list[DocumentRecord] | None = None,
+        db: Database | None = None,
+    ) -> None:
         # Keyed by (case_id, document_id, version)
         self._documents: dict[tuple[str, str, str], DocumentRecord] = {}
+        self._db = db
         if initial_documents:
             for doc in initial_documents:
                 self.add_document(doc)
+
+    def _load_from_db(self, case_id: str | None = None) -> None:
+        """Load document records and extracted pages from SQLite database."""
+        if not self._db:
+            return
+        with self._db.get_connection() as conn:
+            query = "SELECT * FROM documents"
+            params: list[object] = []
+            if case_id:
+                query += " WHERE case_id = ?"
+                params.append(case_id)
+            doc_rows = conn.execute(query, params).fetchall()
+            for d in doc_rows:
+                pages_query = """
+                    SELECT page_number, text, is_blank, character_count
+                    FROM document_pages
+                    WHERE document_id = ? AND version = ?
+                    ORDER BY page_number ASC
+                """
+                page_rows = conn.execute(
+                    pages_query, (d["document_id"], d["version"])
+                ).fetchall()
+                pages = [
+                    ExtractedPage(
+                        page_number=p["page_number"],
+                        text=p["text"],
+                        is_blank=bool(p["is_blank"]),
+                        character_count=p["character_count"],
+                    )
+                    for p in page_rows
+                ]
+                rec = DocumentRecord(
+                    document_id=d["document_id"],
+                    case_id=d["case_id"],
+                    filename=d["filename"],
+                    version=d["version"],
+                    sha256=d["sha256"],
+                    evidence_type=d["evidence_type"],
+                    uploaded_at=d["uploaded_at"],
+                    extraction_status=d["extraction_status"],
+                    total_pages=d["total_pages"],
+                    file_path=d["file_path"],
+                    pages=pages,
+                    error_message=d["error_message"],
+                )
+                self.add_document(rec)
 
     def add_document(self, doc: DocumentRecord) -> None:
         """Register an immutable document version in the store."""
@@ -188,10 +216,24 @@ class EvidenceRetrievalService:
                 if version is not None and v != version:
                     continue
                 return doc
+
+        # Fallback to DB if not found in memory
+        if self._db:
+            self._load_from_db(case_id)
+            for (c_id, d_id, v), doc in self._documents.items():
+                if d_id == document_id:
+                    if case_id is not None and c_id != case_id:
+                        continue
+                    if version is not None and v != version:
+                        continue
+                    return doc
+
         return None
 
     def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
         """List all documents, optionally filtered by case_id."""
+        if self._db:
+            self._load_from_db(case_id)
         if case_id is None:
             return list(self._documents.values())
         return [doc for (c_id, _, _), doc in self._documents.items() if c_id == case_id]

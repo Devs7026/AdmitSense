@@ -4,12 +4,30 @@ import json
 from pathlib import Path
 
 import streamlit as st
-from admitsense.schemas import CaseDetails, ReviewPacket
+from admitsense.documents.models import DocumentRecord, ExtractedPage
+from admitsense.documents.retrieval import SqliteEvidenceRetrieval
+from admitsense.documents.storage import DocumentStorage
+from admitsense.documents.synthetic import (
+    build_synthetic_endorsement_pdf,
+    build_synthetic_hospital_estimate_pdf,
+    build_synthetic_policy_pdf,
+    build_synthetic_schedule_pdf,
+    build_synthetic_unreadable_pdf,
+)
+from admitsense.schemas import CaseDetails, Evidence, ReviewPacket
 from admitsense.storage.case_repository import CaseRepository
 from admitsense.ui.components import render_authorization_badge
 
 
-def _load_sample_packet_fixture() -> ReviewPacket | None:
+def _load_sample_packet_fixture(scenario: str = "supported_finding") -> ReviewPacket | None:
+    # First attempt to load from Owner B's test fixtures module
+    try:
+        from tests.fixtures import get_sample_packet
+        return get_sample_packet(scenario)
+    except Exception:
+        pass
+
+    # Fallback to tests/fixtures/sample_packet.json
     fixture_path = Path("tests") / "fixtures" / "sample_packet.json"
     if fixture_path.exists():
         try:
@@ -21,7 +39,11 @@ def _load_sample_packet_fixture() -> ReviewPacket | None:
     return None
 
 
-def render_workspace_view(repo: CaseRepository) -> None:
+def render_workspace_view(
+    repo: CaseRepository,
+    doc_storage: DocumentStorage | None = None,
+    retrieval: SqliteEvidenceRetrieval | None = None,
+) -> None:
     case_id = st.session_state.get("current_case_id")
     if not case_id:
         st.error("No case selected.")
@@ -37,6 +59,9 @@ def render_workspace_view(repo: CaseRepository) -> None:
             st.session_state.current_view = "home"
             st.rerun()
         return
+
+    storage = doc_storage or DocumentStorage(db=repo.db)
+    ev_retrieval = retrieval or SqliteEvidenceRetrieval(db=repo.db)
 
     # Top Navigation Row
     top_c1, top_c2, top_c3 = st.columns([2, 5, 2])
@@ -83,7 +108,7 @@ def render_workspace_view(repo: CaseRepository) -> None:
         [
             "📋 Case Facts & Provenance",
             "🔍 Findings & Review",
-            "📄 Documents (M2)",
+            "📄 Documents & Evidence Viewer",
             "🔄 Change Replay (M5)",
             "📥 Packet Export (M6)",
         ]
@@ -144,7 +169,18 @@ def render_workspace_view(repo: CaseRepository) -> None:
                 st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
 
     with tab_review:
-        if sample_packet:
+        f_col1, f_col2 = st.columns([2, 1])
+        with f_col1:
+            st.subheader("Review Findings (Development Fixture)")
+        with f_col2:
+            scenario_choice = st.selectbox(
+                "Sample Fixture Scenario:",
+                ["supported_finding", "incomplete_review", "conflict_review", "revised_finding"],
+                index=0,
+            )
+
+        active_packet = _load_sample_packet_fixture(scenario=scenario_choice)
+        if active_packet:
             st.markdown(
                 """
                 <div class="fixture-tag">
@@ -158,14 +194,14 @@ def render_workspace_view(repo: CaseRepository) -> None:
 
             r1, r2, r3 = st.columns(3)
             with r1:
-                st.metric("Packet ID", sample_packet.packet_id)
+                st.metric("Packet ID", active_packet.packet_id)
             with r2:
-                st.metric("Review Status", sample_packet.review_status.upper())
+                st.metric("Review Status", active_packet.review_status.upper())
             with r3:
-                st.metric("Tool Steps Used", f"{sample_packet.tool_steps_used} / 8")
+                st.metric("Tool Steps Used", f"{active_packet.tool_steps_used} / 8")
 
             st.markdown("### Findings")
-            for finding in sample_packet.findings:
+            for finding in active_packet.findings:
                 status_color = "#ea580c" if finding.status == "unresolved" else "#16a34a"
                 with st.expander(f"{finding.topic} — {finding.status.upper()}", expanded=True):
                     st.markdown(f"**Conclusion:** {finding.conclusion}")
@@ -187,9 +223,9 @@ def render_workspace_view(repo: CaseRepository) -> None:
                         st.markdown(f"**Limitations:** {', '.join(finding.limitations)}")
                     st.markdown(f"**Next Action:** {finding.next_action}")
 
-            if sample_packet.missing_evidence_checklist:
+            if active_packet.missing_evidence_checklist:
                 st.markdown("### Missing-Evidence Checklist")
-                for item in sample_packet.missing_evidence_checklist:
+                for item in active_packet.missing_evidence_checklist:
                     st.markdown(
                         f"""
                         <div class="fact-card">
@@ -207,10 +243,191 @@ def render_workspace_view(repo: CaseRepository) -> None:
             )
 
     with tab_docs:
-        st.info(
-            "ℹ️ **Document Ingestion (Milestone M2)**: PDF upload limits, SHA-256 versioning, "
-            "and pypdf page extraction retaining 1-based page numbers will be integrated in M2."
-        )
+        st.subheader("Document Ingestion & Immutable Version History")
+
+        # 1. Document Upload Section
+        with st.expander("📤 Upload New PDF Document", expanded=True):
+            up_col1, up_col2 = st.columns([3, 2])
+            with up_col1:
+                uploaded_file = st.file_uploader(
+                    "Choose PDF file",
+                    type=["pdf"],
+                    help="Upload a policy wording, renewal schedule, endorsement, or hospital estimate (Max 10MB, Max 50 pages).",
+                )
+            with up_col2:
+                doc_evidence_type = st.selectbox(
+                    "Evidence Type:",
+                    [
+                        "policy_wording",
+                        "policy_schedule",
+                        "endorsement",
+                        "hospital_estimate",
+                        "admission_document",
+                        "insurer_correspondence",
+                        "other",
+                    ],
+                )
+
+            if uploaded_file is not None:
+                if st.button("Upload & Extract Document ➔", type="primary"):
+                    try:
+                        content = uploaded_file.getvalue()
+                        record, is_duplicate = storage.save_document(
+                            case_id=case.case_id,
+                            filename=uploaded_file.name,
+                            content=content,
+                            evidence_type=doc_evidence_type,
+                        )
+                        if is_duplicate:
+                            st.info(
+                                f"ℹ️ **Duplicate Detected**: Identical file was already uploaded as "
+                                f"version `{record.version}` of `{record.document_id}` (SHA-256: `{record.sha256[:12]}...`). No redundant version created."
+                            )
+                        else:
+                            st.success(
+                                f"✅ Successfully uploaded `{record.filename}` as **{record.version}**! "
+                                f"Status: `{record.extraction_status.upper()}` ({record.total_pages} physical pages extracted)."
+                            )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Upload failed: {e}")
+
+            st.markdown("---")
+            st.markdown("**Or Quick-Load Synthetic Fixtures for Testing:**")
+            syn_c1, syn_c2, syn_c3, syn_c4, syn_c5 = st.columns(5)
+            with syn_c1:
+                if st.button("📄 Base Policy", use_container_width=True, help="15 pages: contains waiting period clause on p14 and blank p7"):
+                    rec, dup = storage.save_document(
+                        case.case_id, "Care_Health_Gold_Policy_Wording.pdf", build_synthetic_policy_pdf(), "policy_wording"
+                    )
+                    st.toast(f"Policy wording loaded as {rec.version}")
+                    st.rerun()
+            with syn_c2:
+                if st.button("📋 Renewal Schedule", use_container_width=True, help="2 pages: 18 months continuous coverage"):
+                    rec, dup = storage.save_document(
+                        case.case_id, "Policy_Renewal_Schedule.pdf", build_synthetic_schedule_pdf(), "policy_schedule"
+                    )
+                    st.toast(f"Schedule loaded as {rec.version}")
+                    st.rerun()
+            with syn_c3:
+                if st.button("📝 Endorsement", use_container_width=True, help="1 page: reduces waiting period to 12 months"):
+                    rec, dup = storage.save_document(
+                        case.case_id, "Joint_Replacement_Endorsement.pdf", build_synthetic_endorsement_pdf(), "endorsement"
+                    )
+                    st.toast(f"Endorsement loaded as {rec.version}")
+                    st.rerun()
+            with syn_c4:
+                if st.button("🏥 Hospital Estimate", use_container_width=True, help="2 pages: knee replacement estimate"):
+                    rec, dup = storage.save_document(
+                        case.case_id, "Apex_Hospital_Estimate.pdf", build_synthetic_hospital_estimate_pdf(), "hospital_estimate"
+                    )
+                    st.toast(f"Estimate loaded as {rec.version}")
+                    st.rerun()
+            with syn_c5:
+                if st.button("⚠️ Unreadable PDF", use_container_width=True, help="Tests explicit unreadable status"):
+                    rec, dup = storage.save_document(
+                        case.case_id, "Scanned_Receipt_Unreadable.pdf", build_synthetic_unreadable_pdf(), "other"
+                    )
+                    st.toast(f"Unreadable PDF loaded as {rec.version}")
+                    st.rerun()
+
+        # 2. Documents List
+        docs = storage.list_documents(case.case_id)
+        if not docs:
+            st.info("No documents uploaded yet for this case. Upload a PDF or load a synthetic fixture above.")
+        else:
+            st.markdown("### Uploaded Documents & Extraction Status")
+            for doc in docs:
+                status_badge_color = {
+                    "extracted": "#16a34a",
+                    "partial": "#ea580c",
+                    "unreadable": "#eab308",
+                    "error": "#dc2626",
+                    "pending": "#64748b",
+                }.get(doc.extraction_status, "#64748b")
+
+                with st.container():
+                    d1, d2, d3, d4 = st.columns([3, 2, 2, 3])
+                    with d1:
+                        st.markdown(f"📄 **{doc.filename}**")
+                        st.caption(f"ID: `{doc.document_id}` • Version: **`{doc.version}`**")
+                    with d2:
+                        st.markdown(f"Type: `{doc.evidence_type}`")
+                        st.markdown(f"Pages: **{doc.total_pages}**")
+                    with d3:
+                        st.markdown(
+                            f"<span style='background-color: {status_badge_color}; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;'>{doc.extraction_status}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        if doc.error_message:
+                            st.caption(f"Note: {doc.error_message}")
+                    with d4:
+                        st.caption(f"SHA-256: `{doc.sha256[:16]}...`")
+                        st.caption(f"Uploaded: {doc.uploaded_at[:19]}")
+                    st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
+
+            # 3. Interactive Evidence Viewer
+            st.markdown("---")
+            st.subheader("🔍 Physical Page Evidence Viewer")
+
+            doc_options = {f"{d.filename} ({d.version})": (d.document_id, d.version) for d in docs}
+            selected_label = st.selectbox("Select Document & Version to Inspect:", list(doc_options.keys()))
+
+            if selected_label:
+                sel_doc_id, sel_ver = doc_options[selected_label]
+                full_doc = storage.get_document(sel_doc_id, sel_ver)
+
+                if full_doc and full_doc.pages:
+                    total_p = full_doc.total_pages
+                    sel_page_num = st.number_input(
+                        f"Select Physical Page Number (1 to {total_p}):",
+                        min_value=1,
+                        max_value=total_p,
+                        value=14 if total_p >= 14 else 1,
+                        step=1,
+                    )
+
+                    page_obj = next((p for p in full_doc.pages if p.page_number == sel_page_num), None)
+
+                    if page_obj:
+                        if page_obj.is_blank:
+                            st.warning(
+                                f"⚠️ **Physical Page {page_obj.page_number} is Blank** (no extractable text).\n\n"
+                                f"_Physical page positions are strictly preserved so citations do not drift._"
+                            )
+                        else:
+                            st.markdown(
+                                f"**Extracted Text from Physical Page {page_obj.page_number}** "
+                                f"({page_obj.character_count} characters):"
+                            )
+                            st.markdown(
+                                f"""
+                                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.9rem; line-height: 1.5; color: #1e293b;">
+                                    {page_obj.text}
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                            # Citation Verifier Tool
+                            with st.expander("🔬 Test Citation on this Page"):
+                                test_quote = st.text_area(
+                                    "Enter quote to verify against this physical page:",
+                                    value="twenty-four (24) continuous months" if page_obj.page_number == 14 else "",
+                                )
+                                if st.button("Verify Citation ➔"):
+                                    test_ev = Evidence(
+                                        document_id=sel_doc_id,
+                                        document_version=sel_ver,
+                                        page=page_obj.page_number,
+                                        quote=test_quote,
+                                        evidence_type=full_doc.evidence_type,
+                                    )
+                                    is_v, msg = ev_retrieval.verify_citation(test_ev)
+                                    if is_v:
+                                        st.success(f"✅ {msg}")
+                                    else:
+                                        st.error(f"❌ {msg}")
 
     with tab_replay:
         st.info(

@@ -62,5 +62,39 @@ class Database:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_cases_updated_at ON cases(updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS documents (
+                    document_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    version TEXT NOT NULL DEFAULT 'v1',
+                    sha256 TEXT NOT NULL,
+                    evidence_type TEXT NOT NULL DEFAULT 'other',
+                    uploaded_at TEXT NOT NULL,
+                    extraction_status TEXT NOT NULL DEFAULT 'pending',
+                    total_pages INTEGER NOT NULL DEFAULT 0,
+                    file_path TEXT NOT NULL,
+                    error_message TEXT,
+                    PRIMARY KEY (document_id, version),
+                    FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_documents_case ON documents(case_id);
+                CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON documents(case_id, sha256);
+
+                CREATE TABLE IF NOT EXISTS document_pages (
+                    document_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    page_number INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    is_blank INTEGER NOT NULL DEFAULT 0,
+                    character_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (document_id, version, page_number),
+                    FOREIGN KEY (document_id, version) REFERENCES documents(document_id, version) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_pages_doc ON document_pages(document_id, version);
+                CREATE INDEX IF NOT EXISTS idx_pages_case ON document_pages(case_id);
                 """
             )
