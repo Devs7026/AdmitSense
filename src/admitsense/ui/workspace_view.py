@@ -553,7 +553,7 @@ def render_workspace_view(
                                 </div>
                                 <div style="text-align: right;">
                                     <span style="font-weight: 700; font-size: 0.8rem; color: {'#16a34a' if pkt.review_status == 'complete' else '#ea580c'};">{pkt.review_status.upper()}</span><br>
-                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.created_at.strftime('%H:%M:%S') if pkt.created_at else ''}</span>
+                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.generated_at.strftime('%H:%M:%S') if getattr(pkt, 'generated_at', None) else ''}</span>
                                 </div>
                             </div>
                             """,
