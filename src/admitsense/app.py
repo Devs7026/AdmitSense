@@ -90,7 +90,7 @@ def main() -> None:
                 st.rerun()
 
         st.markdown("---")
-        st.caption("AdmitSense v0.3.0 • Milestone M3-A")
+        st.caption("AdmitSense v1.0.0 • Milestone M7")
 
     # Header
     render_app_header()
