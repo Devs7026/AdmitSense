@@ -7,6 +7,12 @@ from admitsense.documents.models import (
 )
 from admitsense.documents.retrieval import SqliteEvidenceRetrieval
 from admitsense.documents.storage import DocumentStorage
+from admitsense.documents.hospital_directory import (
+    HospitalLookupResult,
+    HospitalLookupService,
+    HospitalMatchStatus,
+    LocalSyntheticHospitalDirectory,
+)
 from admitsense.documents.synthetic import (
     build_synthetic_endorsement_pdf,
     build_synthetic_hospital_estimate_pdf,
@@ -26,6 +32,10 @@ __all__ = [
     "normalize_whitespace",
     "DocumentStorage",
     "SqliteEvidenceRetrieval",
+    "HospitalLookupResult",
+    "HospitalLookupService",
+    "HospitalMatchStatus",
+    "LocalSyntheticHospitalDirectory",
     "build_synthetic_policy_pdf",
     "build_synthetic_schedule_pdf",
     "build_synthetic_endorsement_pdf",

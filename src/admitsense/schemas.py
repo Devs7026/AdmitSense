@@ -290,6 +290,24 @@ class Revision(SchemaModel):
         return self
 
 
+class HospitalRecordReference(SchemaModel):
+    """Synthetic hospital reference record conforming to CONTRACTS.md Section 3.4."""
+
+    record_id: NonEmptyStr = Field(description="Unique synthetic record ID, e.g. hosp-synth-001")
+    dataset_version: NonEmptyStr = Field(description="Synthetic dataset version, e.g. v2026.1")
+    dataset_date: date = Field(description="Publication date of synthetic dataset")
+    hospital_name: NonEmptyStr
+    city: NonEmptyStr
+    network_tier: Literal["tier_1", "tier_2", "non_network", "unspecified"] = "unspecified"
+    tpa_desk_contact: NonEmptyStr | None = None
+    limitations: list[NonEmptyStr] = Field(
+        default_factory=lambda: [
+            "Synthetic hospital data for demonstration only.",
+            "Does not establish current insurer network agreement or cashless guarantee.",
+        ]
+    )
+
+
 class ReviewPacket(SchemaModel):
     packet_id: NonEmptyStr
     packet_version: int = Field(default=1, ge=1)
@@ -312,6 +330,9 @@ class ReviewPacket(SchemaModel):
 
     authorization_status: AuthorizationStatus = "not verified"
     authorization_evidence: list[Evidence] = Field(default_factory=list)
+
+    # Synthetic hospital reference directory entry (M6)
+    hospital_record: HospitalRecordReference | None = None
 
     # This validates recorded usage; the execution loop enforces the cap.
     tool_steps_used: int = Field(default=0, ge=0, le=8)
