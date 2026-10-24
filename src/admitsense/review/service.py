@@ -85,9 +85,9 @@ class FixtureReviewRunner:
             )
             evidence_list.append(ev)
 
-            finding = Finding(
+            candidate_finding = Finding(
                 finding_id="find-waiting-period-joint",
-                revision=2 if prior_packet else 1,
+                revision=1,
                 topic="Waiting Period (Joint Replacement)",
                 status="supported",
                 conclusion=(
@@ -99,32 +99,18 @@ class FixtureReviewRunner:
                 relevant_case_facts=["continuous_coverage_start_date", "procedure"],
                 missing_facts=[],
                 limitations=["Insurer claim approval is subject to hospital cashless desk verification."],
-                next_action="Obtain final hospital pre-authorisation estimate for submission to insurer.",
+                next_action="Confirm planned admission date and obtain itemized pre-admission cost estimate from hospital desk.",
             )
-            findings.append(finding)
 
-            if prior_packet:
-                old_f = next(
-                    (f for f in prior_packet.findings if f.finding_id == "find-waiting-period-joint"),
-                    None,
-                )
-                if old_f:
-                    rev = Revision(
-                        revision_id=f"rev-{uuid.uuid4().hex[:8]}",
-                        finding_id="find-waiting-period-joint",
-                        old_finding_revision=old_f.revision,
-                        new_finding_revision=old_f.revision + 1,
-                        old_conclusion=old_f.conclusion,
-                        new_conclusion=finding.conclusion,
-                        old_status=old_f.status,
-                        new_status=finding.status,
-                        trigger_type="new_document",
-                        triggering_evidence=[ev],
-                        reason="Uploaded endorsement schedule EW-2025-01 reduces joint replacement waiting period to 12 months.",
-                        affected_topics=["Waiting Period (Joint Replacement)"],
-                        created_at=_utc_now(),
-                    )
-                    revisions.append(rev)
+            from admitsense.review.replay import compute_evidence_replay
+
+            findings, revisions = compute_evidence_replay(
+                prior_packet=prior_packet,
+                new_findings=[candidate_finding],
+                trigger_type="new_document",
+                triggering_evidence=[ev],
+                reason="Uploaded endorsement schedule EW-2025-01 reduces joint replacement waiting period to 12 months.",
+            )
 
             review_status = "complete"
             stopped_reason = "review_complete"
@@ -146,29 +132,32 @@ class FixtureReviewRunner:
             )
             evidence_list.append(ev)
 
-            finding = Finding(
+            candidate_finding = Finding(
                 finding_id="find-waiting-period-joint",
                 revision=1,
                 topic="Waiting Period (Joint Replacement)",
                 status="unresolved",
                 conclusion=(
-                    "Standard policy terms stipulate a 24-month waiting period for joint replacement "
-                    "surgeries under Section 4.2(b). Continuous coverage history is 18 months, leaving "
-                    "a potential 6-month gap unless an applicable endorsement or continuity certificate applies."
+                    "Policy terms impose a specific waiting period of 24 continuous months for total knee "
+                    "replacement under Section 4.2(b). With 18 months of continuous coverage documented, "
+                    "there is a 6-month shortfall before this specific condition is covered."
                 ),
                 evidence=[ev],
                 relevant_case_facts=["continuous_coverage_start_date", "procedure"],
-                missing_facts=["Prior policy continuity certificate or corporate waiver endorsement"],
-                limitations=[
-                    "Endorsement schedule not yet provided to determine if corporate waiver applies."
-                ],
-                next_action=(
-                    "Request prior policy continuity certificate or endorsement schedule from "
-                    "insurer/broker to clarify if waiting period was waived."
-                ),
+                missing_facts=["continuous_coverage_records"],
+                limitations=["Applies solely to specific waiting period under Section 4.2(b)."],
+                next_action="Request continuity proof or verify whether earlier portability credits apply to bridge 6-month shortfall.",
             )
-            findings.append(finding)
 
+            from admitsense.review.replay import compute_evidence_replay
+
+            findings, revisions = compute_evidence_replay(
+                prior_packet=prior_packet,
+                new_findings=[candidate_finding],
+                trigger_type="new_document",
+                triggering_evidence=[ev],
+                reason="Base health insurance policy wording establishes 24-month waiting period for joint disorders.",
+            )
             checklist.append(
                 MissingEvidenceItem(
                     item_id="chk-continuity-cert",
@@ -269,6 +258,7 @@ class ReviewService:
             raise KeyError(f"Case '{case_id}' does not exist.")
 
         prior_packet = self.review_repo.get_latest_review_packet(case_id)
+        expected_prior_version = prior_packet.packet_version if prior_packet else 0
 
         # Enforce budget boundary
         bounded_budget = min(max(1, tool_budget), 8)
@@ -333,8 +323,10 @@ class ReviewService:
         if prior_packet and packet.packet_version <= prior_packet.packet_version:
             packet = packet.model_copy(update={"packet_version": prior_packet.packet_version + 1})
 
-        # Persist snapshot atomically
-        saved_packet = self.review_repo.save_review_packet(packet)
+        # Persist snapshot atomically with stale review guard
+        saved_packet = self.review_repo.save_review_packet(
+            packet, expected_prior_packet_version=expected_prior_version
+        )
         return saved_packet
 
     def resume_review(

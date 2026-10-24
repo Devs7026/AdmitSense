@@ -4,8 +4,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from admitsense.schemas import MissingEvidenceItem, ReviewPacket, Revision
+from admitsense.schemas import Finding, MissingEvidenceItem, ReviewPacket, Revision
 from admitsense.storage.database import Database
+
+
+class StaleReviewError(RuntimeError):
+    """Raised when an execution attempts to save against an outdated case/packet state."""
+    pass
 
 
 def _utc_now_iso() -> str:
@@ -18,13 +23,19 @@ class ReviewRepository:
     def __init__(self, db: Database | None = None) -> None:
         self.db = db or Database()
 
-    def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket:
+    def save_review_packet(
+        self,
+        packet: ReviewPacket,
+        expected_prior_packet_version: int | None = None,
+    ) -> ReviewPacket:
         """
         Persists a review packet snapshot atomically in a single SQLite transaction.
-        1. Inserts review_packets metadata and serialized JSON snapshot.
-        2. Inserts current findings with their revision number.
-        3. Inserts new Revision entries linking old and new finding revisions.
-        4. Inserts missing evidence checklist items.
+        1. If expected_prior_packet_version is given, validates that no newer packet has been committed.
+        2. Inserts review_packets metadata and serialized JSON snapshot.
+        3. Inserts current findings with their revision number.
+        4. Inserts new Revision entries linking old and new finding revisions.
+        5. Inserts missing evidence checklist items.
+        Rolls back completely if any step fails.
         """
         now = _utc_now_iso()
         case_id = packet.case.case_id
@@ -56,6 +67,23 @@ class ReviewRepository:
         packet_json = json.dumps(packet_dict)
 
         with self.db.get_connection() as conn:
+            # 0. Stale result optimistic concurrency check
+            if expected_prior_packet_version is not None:
+                latest_row = conn.execute(
+                    """
+                    SELECT packet_version FROM review_packets
+                    WHERE case_id = ?
+                    ORDER BY packet_version DESC, created_at DESC
+                    LIMIT 1
+                    """,
+                    (case_id,),
+                ).fetchone()
+                latest_version = latest_row["packet_version"] if latest_row else 0
+                if latest_version != expected_prior_packet_version:
+                    raise StaleReviewError(
+                        f"Stale review rejected: Expected prior packet version {expected_prior_packet_version}, "
+                        f"but case '{case_id}' already has newer packet version {latest_version}. Aborting update."
+                    )
             # 1. Insert review_packets
             conn.execute(
                 """
@@ -239,9 +267,82 @@ class ReviewRepository:
                 """
                 SELECT * FROM revisions
                 WHERE case_id = ? AND finding_id = ?
-                ORDER BY new_finding_revision ASC
+                GROUP BY revision_id
+                ORDER BY new_finding_revision ASC, created_at ASC
                 """,
                 (case_id, finding_id),
+            ).fetchall()
+
+            revisions: list[Revision] = []
+            for r in rows:
+                rev_dict = {
+                    "revision_id": r["revision_id"],
+                    "finding_id": r["finding_id"],
+                    "old_finding_revision": r["old_finding_revision"],
+                    "new_finding_revision": r["new_finding_revision"],
+                    "old_conclusion": r["old_conclusion"],
+                    "new_conclusion": r["new_conclusion"],
+                    "old_status": r["old_status"],
+                    "new_status": r["new_status"],
+                    "trigger_type": r["trigger_type"],
+                    "triggering_evidence": json.loads(r["triggering_evidence_json"]),
+                    "changed_case_facts": json.loads(r["changed_case_facts_json"]),
+                    "reason": r["reason"],
+                    "affected_topics": json.loads(r["affected_topics_json"]),
+                    "created_at": r["created_at"],
+                }
+                revisions.append(Revision.model_validate(rev_dict))
+            return revisions
+
+    def get_finding_snapshot(
+        self,
+        case_id: str,
+        finding_id: str,
+        revision: int,
+    ) -> Finding | None:
+        """Fetch the exact historical finding record and its evidence at a specific revision."""
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT f.*, p.packet_version
+                FROM findings f
+                JOIN review_packets p ON f.packet_id = p.packet_id
+                WHERE f.case_id = ? AND f.finding_id = ? AND f.revision = ?
+                ORDER BY p.packet_version DESC, f.created_at DESC
+                LIMIT 1
+                """,
+                (case_id, finding_id, revision),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            finding_dict = {
+                "finding_id": row["finding_id"],
+                "revision": row["revision"],
+                "topic": row["topic"],
+                "status": row["status"],
+                "conclusion": row["conclusion"],
+                "next_action": row["next_action"],
+                "evidence": json.loads(row["evidence_json"]),
+                "relevant_case_facts": json.loads(row["relevant_case_facts_json"]),
+                "missing_facts": json.loads(row["missing_facts_json"]),
+                "limitations": json.loads(row["limitations_json"]),
+                "created_at": row["created_at"],
+            }
+            return Finding.model_validate(finding_dict)
+
+    def list_all_revisions(self, case_id: str) -> list[Revision]:
+        """Retrieve chronological audit trail of all revisions across all findings for a case."""
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM revisions
+                WHERE case_id = ?
+                GROUP BY revision_id
+                ORDER BY created_at ASC
+                """,
+                (case_id,),
             ).fetchall()
 
             revisions: list[Revision] = []

@@ -820,10 +820,286 @@ def render_workspace_view(
                                         st.error(f"❌ {msg}")
 
     with tab_replay:
-        st.info(
-            "ℹ️ **Evidence Change Replay (Milestone M5)**: Traceable before-and-after audit diffs "
-            "showing how endorsements or new facts revise findings will be integrated in M5."
+        st.subheader("🔄 Evidence Change Replay")
+        st.caption(
+            "Traceable before-and-after diffs showing how newly uploaded policy endorsements, "
+            "revised schedules, or updated case facts modified administrative preparation findings."
         )
+
+        replay_packet = persisted_packet
+        is_fixture_mode = False
+
+        if not replay_packet:
+            # Check if user wants to preview development fixture
+            st.info(
+                "ℹ️ No review has been executed for this case yet. "
+                "You can preview a simulated Evidence Change Replay fixture below (Owner B Mock Data)."
+            )
+            sample_revised = _load_sample_packet_fixture(scenario="revised_finding")
+            if sample_revised:
+                st.markdown(
+                    """
+                    <div class="fixture-tag" style="margin-bottom: 1rem;">
+                        ⚠️ <strong>DEVELOPMENT FIXTURE — Simulated Evidence Change Replay</strong><br>
+                        Demonstrating how an uploaded endorsement amends waiting period terms from 24 to 12 months.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                replay_packet = sample_revised
+                is_fixture_mode = True
+
+        if replay_packet:
+            # If multiple historical packets exist, provide version selector
+            hist_packets = r_repo.list_review_packets(case.case_id) if not is_fixture_mode else [replay_packet]
+            selected_pkt = replay_packet
+
+            if len(hist_packets) > 1:
+                ver_options = [f"v{p.packet_version} (Run: {p.run_id[:16]}...)" for p in hist_packets]
+                sel_idx = st.selectbox(
+                    "Select Review Packet Version to Inspect Replay:",
+                    range(len(ver_options)),
+                    format_func=lambda i: ver_options[i],
+                    index=0,
+                )
+                selected_pkt = hist_packets[sel_idx]
+
+            st.markdown(
+                f"""
+                <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>Packet Version:</strong> <code>v{selected_pkt.packet_version}</code> &bull;
+                        <strong>Run ID:</strong> <code>{selected_pkt.run_id}</code> &bull;
+                        <strong>Total Findings:</strong> {len(selected_pkt.findings)} &bull;
+                        <strong>Revisions in this Packet:</strong> {len(selected_pkt.revisions)}
+                    </div>
+                    <div>
+                        <span style="font-size: 0.8rem; color: #475569;">
+                            Authorisation: <strong>{selected_pkt.authorization_status.upper()}</strong>
+                        </span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Categorize findings: Changed, Unchanged, Newly Introduced
+            revisions_by_finding: dict[str, Revision] = {
+                r.finding_id: r for r in selected_pkt.revisions
+            }
+
+            changed_findings: list[tuple[Finding, Revision]] = []
+            unchanged_findings: list[Finding] = []
+            new_findings: list[Finding] = []
+
+            for f in selected_pkt.findings:
+                if f.finding_id in revisions_by_finding:
+                    changed_findings.append((f, revisions_by_finding[f.finding_id]))
+                elif f.revision > 1:
+                    # Carried forward from an earlier revision, but unchanged in this run
+                    unchanged_findings.append(f)
+                else:
+                    # Revision == 1: check if this finding existed in earlier packet
+                    if selected_pkt.packet_version > 1 and len(hist_packets) > 1:
+                        # Check prior packets
+                        prior_pkts = [p for p in hist_packets if p.packet_version < selected_pkt.packet_version]
+                        in_prior = any(any(pf.finding_id == f.finding_id for pf in p.findings) for p in prior_pkts)
+                        if in_prior:
+                            unchanged_findings.append(f)
+                        else:
+                            new_findings.append(f)
+                    else:
+                        new_findings.append(f)
+
+            # 1. Changed Findings Section
+            st.markdown(f"### ⚡ Changed Findings ({len(changed_findings)})")
+            if not changed_findings:
+                st.caption(
+                    "No findings were revised in this review run. All existing findings remained unaltered by the evidence."
+                )
+
+            for idx, (f, rev) in enumerate(changed_findings):
+                st_old_badge = {
+                    "supported": ("#16a34a", "SUPPORTED"),
+                    "unresolved": ("#ea580c", "UNRESOLVED"),
+                    "conflict": ("#dc2626", "CONFLICT"),
+                    "needs_human_review": ("#7c3aed", "NEEDS HUMAN REVIEW"),
+                }.get(rev.old_status, ("#64748b", rev.old_status.upper()))
+
+                st_new_badge = {
+                    "supported": ("#16a34a", "SUPPORTED"),
+                    "unresolved": ("#ea580c", "UNRESOLVED"),
+                    "conflict": ("#dc2626", "CONFLICT"),
+                    "needs_human_review": ("#7c3aed", "NEEDS HUMAN REVIEW"),
+                }.get(rev.new_status, ("#64748b", rev.new_status.upper()))
+
+                with st.expander(
+                    f"🔄 {f.topic} — Revised from {st_old_badge[1]} to {st_new_badge[1]} (Rev {rev.old_finding_revision} ➔ Rev {rev.new_finding_revision})",
+                    expanded=True,
+                ):
+                    # Why it changed banner
+                    trigger_label = {
+                        "new_document": "📄 New Document Upload",
+                        "user_correction": "✏️ User Fact Correction",
+                        "case_details_changed": "📋 Case Details Updated",
+                    }.get(rev.trigger_type, rev.trigger_type.upper())
+
+                    st.markdown(
+                        f"""
+                        <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 0.6rem 0.85rem; border-radius: 4px; margin-bottom: 0.75rem;">
+                            <span style="font-size: 0.8rem; font-weight: 700; color: #1e40af; text-transform: uppercase;">
+                                {trigger_label}
+                            </span><br>
+                            <span style="color: #1e3a8a; font-size: 0.92rem;">
+                                <strong>Why it changed:</strong> {rev.reason}
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    # Two-column before / after display
+                    diff_col1, diff_col2 = st.columns(2)
+
+                    with diff_col1:
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 0.85rem; height: 100%;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-weight: 700; color: #991b1b; font-size: 0.85rem;">PREVIOUS (Rev {rev.old_finding_revision})</span>
+                                    <span style="background-color: {st_old_badge[0]}; color: white; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                        {st_old_badge[1]}
+                                    </span>
+                                </div>
+                                <p style="font-size: 0.88rem; color: #7f1d1d; margin: 0 0 0.5rem 0; line-height: 1.45;">
+                                    {rev.old_conclusion}
+                                </p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        # Look up previous finding snapshot if available
+                        if not is_fixture_mode:
+                            old_snapshot = r_repo.get_finding_snapshot(
+                                case_id=case.case_id,
+                                finding_id=f.finding_id,
+                                revision=rev.old_finding_revision,
+                            )
+                            if old_snapshot and old_snapshot.evidence:
+                                with st.expander(f"📜 View Previous Evidence ({len(old_snapshot.evidence)} citations)"):
+                                    for p_idx, p_ev in enumerate(old_snapshot.evidence):
+                                        st.caption(
+                                            f"**Doc:** `{p_ev.document_id}` ({p_ev.document_version}) &bull; **Page:** {p_ev.page}\n\n"
+                                            f"*\"{p_ev.quote}\"*"
+                                        )
+                                        if st.button(
+                                            f"🔗 Open Old Page {p_ev.page}",
+                                            key=f"btn_old_ev_{f.finding_id}_{p_idx}",
+                                            use_container_width=True,
+                                        ):
+                                            st.session_state.inspect_doc_id = p_ev.document_id
+                                            st.session_state.inspect_version = p_ev.document_version
+                                            st.session_state.inspect_page = p_ev.page
+                                            st.session_state.inspect_quote = p_ev.quote
+                                            st.info(f"Navigate to 'Documents & Evidence Viewer' to view Page {p_ev.page}.")
+
+                    with diff_col2:
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.85rem; height: 100%;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-weight: 700; color: #166534; font-size: 0.85rem;">UPDATED (Rev {rev.new_finding_revision})</span>
+                                    <span style="background-color: {st_new_badge[0]}; color: white; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                        {st_new_badge[1]}
+                                    </span>
+                                </div>
+                                <p style="font-size: 0.88rem; color: #14532d; margin: 0 0 0.5rem 0; line-height: 1.45;">
+                                    {rev.new_conclusion}
+                                </p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                    # Triggering Evidence Card
+                    if rev.triggering_evidence:
+                        st.markdown("**Triggering Evidence Cited in Revision:**")
+                        for t_idx, t_ev in enumerate(rev.triggering_evidence):
+                            tr_col1, tr_col2 = st.columns([4, 1])
+                            with tr_col1:
+                                st.markdown(
+                                    f"""
+                                    <div style="background-color: #f8fafc; border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; font-size: 0.88rem;">
+                                        <em>"{t_ev.quote}"</em><br>
+                                        <span style="color: #64748b; font-size: 0.8rem;">
+                                            Document: <code>{t_ev.document_id}</code> ({t_ev.document_version}) &bull; Physical Page: <strong>{t_ev.page}</strong>
+                                        </span>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                            with tr_col2:
+                                if st.button(
+                                    f"🔗 View Page {t_ev.page}",
+                                    key=f"btn_trig_ev_{f.finding_id}_{t_idx}",
+                                    use_container_width=True,
+                                    help="Jump to triggering endorsement/revision page in Evidence Viewer",
+                                ):
+                                    st.session_state.inspect_doc_id = t_ev.document_id
+                                    st.session_state.inspect_version = t_ev.document_version
+                                    st.session_state.inspect_page = t_ev.page
+                                    st.session_state.inspect_quote = t_ev.quote
+                                    st.info(f"Navigate to 'Documents & Evidence Viewer' to view Page {t_ev.page}.")
+
+                    # Updated next action banner
+                    st.markdown(
+                        f"""
+                        <div style="margin-top: 0.6rem; padding: 0.5rem 0.75rem; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;">
+                            <strong style="color: #334155; font-size: 0.85rem;">Updated Next Action:</strong>
+                            <span style="color: #1e293b; font-size: 0.88rem;"> {f.next_action}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            # 2. Unchanged Findings Section
+            st.markdown(f"### 📌 Unchanged Findings ({len(unchanged_findings)})")
+            if unchanged_findings:
+                for uf in unchanged_findings:
+                    u_badge = {
+                        "supported": ("#16a34a", "SUPPORTED"),
+                        "unresolved": ("#ea580c", "UNRESOLVED"),
+                        "conflict": ("#dc2626", "CONFLICT"),
+                        "needs_human_review": ("#7c3aed", "NEEDS HUMAN REVIEW"),
+                    }.get(uf.status, ("#64748b", uf.status.upper()))
+                    with st.expander(f"{uf.topic} — {u_badge[1]} (Unchanged, Rev {uf.revision})", expanded=False):
+                        st.caption("ℹ️ This finding was evaluated in a previous run and was not modified by the latest evidence.")
+                        st.markdown(f"**Conclusion:** {uf.conclusion}")
+                        if uf.evidence:
+                            st.markdown(f"**Active Evidence:** *\"{uf.evidence[0].quote}\"* (Page {uf.evidence[0].page})")
+                        st.markdown(f"**Next Action:** {uf.next_action}")
+            else:
+                st.caption("None.")
+
+            # 3. Newly Introduced Findings Section
+            st.markdown(f"### ✨ Newly Introduced Findings ({len(new_findings)})")
+            if new_findings:
+                for nf in new_findings:
+                    n_badge = {
+                        "supported": ("#16a34a", "SUPPORTED"),
+                        "unresolved": ("#ea580c", "UNRESOLVED"),
+                        "conflict": ("#dc2626", "CONFLICT"),
+                        "needs_human_review": ("#7c3aed", "NEEDS HUMAN REVIEW"),
+                    }.get(nf.status, ("#64748b", nf.status.upper()))
+                    with st.expander(f"{nf.topic} — {n_badge[1]} (Newly Introduced, Rev 1)", expanded=False):
+                        st.markdown(f"**Conclusion:** {nf.conclusion}")
+                        if nf.evidence:
+                            st.markdown(f"**Evidence:** *\"{nf.evidence[0].quote}\"* (Page {nf.evidence[0].page})")
+                        st.markdown(f"**Next Action:** {nf.next_action}")
+            else:
+                st.caption("None.")
+
 
     with tab_export:
         st.info(
