@@ -151,8 +151,8 @@ def render_workspace_view(
     st.markdown(
         f"""
         <div class="next-action-card">
-            <h4 style="margin: 0 0 0.35rem 0; color: #1e3a8a;">Recommended Next Action</h4>
-            <p style="margin: 0; color: #1e40af; font-size: 0.95rem;">{next_action_text}</p>
+            <h4>Recommended Next Action</h4>
+            <p>{next_action_text}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -218,7 +218,7 @@ def render_workspace_view(
                         )
                     else:
                         st.markdown(
-                            "<span class='provenance-tag' style='background: #f1f5f9; color: #94a3b8;'>no source</span>",
+                            "<span class='provenance-tag' style='background: rgba(148, 163, 184, 0.15); color: #94a3b8;'>no source</span>",
                             unsafe_allow_html=True,
                         )
                 st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
@@ -231,23 +231,23 @@ def render_workspace_view(
             rec = hosp_res.record
             st.markdown(
                 f"""
-                <div style="background-color: #faf5ff; border: 1px solid #d8b4fe; border-left: 5px solid #8b5cf6; border-radius: 8px; padding: 0.85rem 1.15rem; margin-top: 0.5rem;">
+                <div class="hospital-box">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div>
-                            <span style="background-color: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; font-weight: 700;">SYNTHETIC DEMONSTRATION DATA</span>
-                            <h4 style="margin: 0.35rem 0 0.15rem 0; font-size: 1.05rem; color: #1e1b4b;">{rec.hospital_name}</h4>
-                            <span style="font-size: 0.85rem; color: #475569;">
+                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #7e22ce; border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 4px; padding: 2px 6px; font-size: 0.72rem; font-weight: 700;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <h4>{rec.hospital_name}</h4>
+                            <span style="font-size: 0.88rem;">
                                 City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Dataset Version: <strong>{rec.dataset_version}</strong> ({rec.dataset_date.strftime('%d %b %Y')})
                             </span>
                         </div>
                         <div style="text-align: right;">
-                            <span style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">{rec.network_tier.replace('_', ' ')}</span>
-                            <div style="font-size: 0.8rem; color: #475569; margin-top: 0.3rem;">
+                            <span style="background-color: rgba(14, 165, 233, 0.2); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.4); border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">{rec.network_tier.replace('_', ' ')}</span>
+                            <div style="font-size: 0.82rem; margin-top: 0.35rem;">
                                 TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
                             </div>
                         </div>
                     </div>
-                    <div style="margin-top: 0.65rem; font-size: 0.8rem; color: #6b21a8; background-color: #f3e8ff; padding: 0.45rem 0.75rem; border-radius: 4px;">
+                    <div style="margin-top: 0.65rem; font-size: 0.82rem; color: #7c3aed; background-color: rgba(139, 92, 246, 0.12); padding: 0.5rem 0.85rem; border-radius: 4px; line-height: 1.45;">
                         ⚠️ <strong>Invariant & Limitations:</strong> Synthetic hospital directory match does NOT verify live insurer network status, cashless eligibility, or claim approval. Cashless agreements must be verified directly with the hospital admission desk and insurance TPA.
                     </div>
                 </div>
@@ -278,16 +278,16 @@ def render_workspace_view(
             status_color = "#16a34a" if persisted_packet.review_status == "complete" else "#ea580c"
             st.markdown(
                 f"""
-                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 0.75rem;">
+                <div class="packet-banner">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 700; font-size: 1.1rem; color: #1e293b;">
+                        <span style="font-weight: 700; font-size: 1.1rem;">
                             Persisted Review Packet: <code>{persisted_packet.packet_id}</code> (v{persisted_packet.packet_version})
                         </span>
-                        <span style="background-color: {status_color}; color: white; padding: 0.25rem 0.65rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">
+                        <span style="background-color: {status_color}; color: white !important; padding: 0.25rem 0.65rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">
                             {persisted_packet.review_status}
                         </span>
                     </div>
-                    <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.85rem; color: #64748b;">
+                    <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.88rem;">
                         <span>Run ID: <code>{persisted_packet.run_id}</code></span>
                         <span>Tool Steps Used: <strong>{persisted_packet.tool_steps_used} / 8</strong></span>
                         <span>Stop Reason: <strong>{persisted_reason_label(persisted_packet.stopped_reason)}</strong></span>
@@ -331,13 +331,13 @@ def render_workspace_view(
                         summary_txt = evt.get("summary", "")
                         st.markdown(
                             f"""
-                            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.45rem 0.75rem; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: center;">
+                            <div class="activity-step-box">
                                 <div>
-                                    <span style="font-weight: 700; font-size: 0.82rem; color: #334155;">Step {step_num}/8</span> &nbsp;
-                                    <code style="font-size: 0.85rem; color: #0f172a;">{tool_nm}</code> &nbsp;
-                                    <span style="color: #475569; font-size: 0.88rem;">{summary_txt}</span>
+                                    <span style="font-weight: 700; font-size: 0.84rem;">Step {step_num}/8</span> &nbsp;
+                                    <code style="font-size: 0.85rem;">{tool_nm}</code> &nbsp;
+                                    <span style="font-size: 0.88rem;">{summary_txt}</span>
                                 </div>
-                                <span style="background-color: {st_badge[0]}; color: white; padding: 0.15rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                <span style="background-color: {st_badge[0]}; color: white !important; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
                                     {st_badge[1]}
                                 </span>
                             </div>
@@ -373,9 +373,9 @@ def render_workspace_view(
                             with c_col1:
                                 st.markdown(
                                     f"""
-                                    <div style="background-color: #f8fafc; border-left: 3px solid #64748b; padding: 0.5rem 0.75rem; font-size: 0.88rem;">
-                                        <em>"{ev.quote}"</em><br>
-                                        <span style="color: #64748b; font-size: 0.8rem;">
+                                    <div class="evidence-quote-box">
+                                        <em>"{ev.quote}"</em>
+                                        <span>
                                             Document: <code>{ev.document_id}</code> ({ev.document_version}) &bull; Physical Page: <strong>{ev.page}</strong>
                                         </span>
                                     </div>
@@ -411,11 +411,11 @@ def render_workspace_view(
                             <div class="fact-card" style="margin-bottom: 0.5rem;">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                                     <div>
-                                        <strong>Requested:</strong> {item.requested_information}<br>
-                                        <span style="font-size: 0.9rem; color: #475569;"><strong>Why it matters:</strong> {item.why_it_matters}</span><br>
-                                        <span style="font-size: 0.85rem; color: #64748b;"><strong>Suggested Source:</strong> {item.suggested_source or 'Insurer / TPA'}</span>
+                                        <strong>Requested:</strong> <span style="font-weight: 600;">{item.requested_information}</span><br>
+                                        <span style="font-size: 0.9rem;"><strong>Why it matters:</strong> {item.why_it_matters}</span><br>
+                                        <span style="font-size: 0.85rem;"><strong>Suggested Source:</strong> {item.suggested_source or 'Insurer / TPA'}</span>
                                     </div>
-                                    <span style="font-size: 0.8rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; background: {'#dcfce7; color: #166534' if item.status == 'provided_pending_review' else '#fef3c7; color: #92400e' if item.status == 'requested' else '#e2e8f0; color: #475569'};">
+                                    <span style="font-size: 0.8rem; font-weight: 700; padding: 0.25rem 0.55rem; border-radius: 4px; background: {'rgba(34, 197, 94, 0.2); color: #15803d' if item.status == 'provided_pending_review' else 'rgba(245, 158, 11, 0.2); color: #b45309' if item.status == 'requested' else 'rgba(100, 116, 139, 0.2); color: #475569'};">
                                         {item.status.upper().replace('_', ' ')}
                                     </span>
                                 </div>
@@ -600,14 +600,14 @@ def render_workspace_view(
                         is_current = pkt.packet_id == persisted_packet.packet_id
                         st.markdown(
                             f"""
-                            <div style="background-color: {'#eff6ff' if is_current else '#f8fafc'}; border: 1px solid {'#93c5fd' if is_current else '#e2e8f0'}; border-radius: 6px; padding: 0.45rem 0.75rem; margin-bottom: 0.35rem; display: flex; justify-content: space-between;">
+                            <div class="packet-banner" style="margin-bottom: 0.4rem; padding: 0.55rem 0.85rem; display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <strong>v{pkt.packet_version}</strong> &bull; <code>{pkt.packet_id}</code> &bull; Run: <code>{pkt.run_id}</code><br>
-                                    <span style="font-size: 0.8rem; color: #64748b;">Tool Steps: {pkt.tool_steps_used}/8 &bull; Stop Reason: {persisted_reason_label(pkt.stopped_reason)}</span>
+                                    <span style="font-size: 0.82rem;">Tool Steps: <strong>{pkt.tool_steps_used}/8</strong> &bull; Stop Reason: <strong>{persisted_reason_label(pkt.stopped_reason)}</strong></span>
                                 </div>
                                 <div style="text-align: right;">
                                     <span style="font-weight: 700; font-size: 0.8rem; color: {'#16a34a' if pkt.review_status == 'complete' else '#ea580c'};">{pkt.review_status.upper()}</span><br>
-                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.generated_at.strftime('%H:%M:%S') if getattr(pkt, 'generated_at', None) else ''}</span>
+                                    <span style="font-size: 0.75rem;">{pkt.generated_at.strftime('%H:%M:%S') if getattr(pkt, 'generated_at', None) else ''}</span>
                                 </div>
                             </div>
                             """,
@@ -836,13 +836,13 @@ def render_workspace_view(
                                 exact_match = page_obj.text[start_idx:end_idx]
                                 rendered_text = (
                                     page_obj.text[:start_idx]
-                                    + f"<mark style='background-color: #fef08a; padding: 0.1rem 0.3rem;'>{exact_match}</mark>"
+                                    + f"<mark style='background-color: #fef08a; color: #1e293b; font-weight: 600; padding: 0.1rem 0.3rem; border-radius: 3px;'>{exact_match}</mark>"
                                     + page_obj.text[end_idx:]
                                 )
 
                             st.markdown(
                                 f"""
-                                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.9rem; line-height: 1.5; color: #1e293b;">
+                                <div class="extracted-text-viewer">
                                     {rendered_text}
                                 </div>
                                 """,
@@ -920,16 +920,16 @@ def render_workspace_view(
 
             st.markdown(
                 f"""
-                <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <div class="packet-banner" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                     <div>
                         <strong>Packet Version:</strong> <code>v{selected_pkt.packet_version}</code> &bull;
                         <strong>Run ID:</strong> <code>{selected_pkt.run_id}</code> &bull;
-                        <strong>Total Findings:</strong> {len(selected_pkt.findings)} &bull;
-                        <strong>Revisions in this Packet:</strong> {len(selected_pkt.revisions)}
+                        <strong>Total Findings:</strong> <strong>{len(selected_pkt.findings)}</strong> &bull;
+                        <strong>Revisions in this Packet:</strong> <strong>{len(selected_pkt.revisions)}</strong>
                     </div>
                     <div>
-                        <span style="font-size: 0.8rem; color: #475569;">
-                            Authorisation: <strong>{selected_pkt.authorization_status.upper()}</strong>
+                        <span style="font-size: 0.82rem;">
+                            Authorisation: <strong style="text-transform: uppercase;">{selected_pkt.authorization_status}</strong>
                         </span>
                     </div>
                 </div>
@@ -1000,11 +1000,11 @@ def render_workspace_view(
 
                     st.markdown(
                         f"""
-                        <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 0.6rem 0.85rem; border-radius: 4px; margin-bottom: 0.75rem;">
-                            <span style="font-size: 0.8rem; font-weight: 700; color: #1e40af; text-transform: uppercase;">
+                        <div class="next-action-card" style="margin-bottom: 0.75rem; padding: 0.65rem 0.95rem;">
+                            <span style="font-size: 0.8rem; font-weight: 700; color: #2563eb; text-transform: uppercase;">
                                 {trigger_label}
                             </span><br>
-                            <span style="color: #1e3a8a; font-size: 0.92rem;">
+                            <span style="font-size: 0.92rem;">
                                 <strong>Why it changed:</strong> {rev.reason}
                             </span>
                         </div>
@@ -1018,14 +1018,14 @@ def render_workspace_view(
                     with diff_col1:
                         st.markdown(
                             f"""
-                            <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 0.85rem; height: 100%;">
+                            <div class="diff-card-old">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                                    <span style="font-weight: 700; color: #991b1b; font-size: 0.85rem;">PREVIOUS (Rev {rev.old_finding_revision})</span>
-                                    <span style="background-color: {st_old_badge[0]}; color: white; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                    <span style="font-weight: 700; font-size: 0.85rem;">PREVIOUS (Rev {rev.old_finding_revision})</span>
+                                    <span style="background-color: {st_old_badge[0]}; color: white !important; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
                                         {st_old_badge[1]}
                                     </span>
                                 </div>
-                                <p style="font-size: 0.88rem; color: #7f1d1d; margin: 0 0 0.5rem 0; line-height: 1.45;">
+                                <p>
                                     {rev.old_conclusion}
                                 </p>
                             </div>
@@ -1061,14 +1061,14 @@ def render_workspace_view(
                     with diff_col2:
                         st.markdown(
                             f"""
-                            <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.85rem; height: 100%;">
+                            <div class="diff-card-new">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                                    <span style="font-weight: 700; color: #166534; font-size: 0.85rem;">UPDATED (Rev {rev.new_finding_revision})</span>
-                                    <span style="background-color: {st_new_badge[0]}; color: white; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                    <span style="font-weight: 700; font-size: 0.85rem;">UPDATED (Rev {rev.new_finding_revision})</span>
+                                    <span style="background-color: {st_new_badge[0]}; color: white !important; padding: 0.12rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
                                         {st_new_badge[1]}
                                     </span>
                                 </div>
-                                <p style="font-size: 0.88rem; color: #14532d; margin: 0 0 0.5rem 0; line-height: 1.45;">
+                                <p>
                                     {rev.new_conclusion}
                                 </p>
                             </div>
@@ -1084,9 +1084,9 @@ def render_workspace_view(
                             with tr_col1:
                                 st.markdown(
                                     f"""
-                                    <div style="background-color: #f8fafc; border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; font-size: 0.88rem;">
-                                        <em>"{t_ev.quote}"</em><br>
-                                        <span style="color: #64748b; font-size: 0.8rem;">
+                                    <div class="evidence-quote-box">
+                                        <em>"{t_ev.quote}"</em>
+                                        <span>
                                             Document: <code>{t_ev.document_id}</code> ({t_ev.document_version}) &bull; Physical Page: <strong>{t_ev.page}</strong>
                                         </span>
                                     </div>
@@ -1109,9 +1109,9 @@ def render_workspace_view(
                     # Updated next action banner
                     st.markdown(
                         f"""
-                        <div style="margin-top: 0.6rem; padding: 0.5rem 0.75rem; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;">
-                            <strong style="color: #334155; font-size: 0.85rem;">Updated Next Action:</strong>
-                            <span style="color: #1e293b; font-size: 0.88rem;"> {f.next_action}</span>
+                        <div class="next-action-card" style="margin-top: 0.6rem; padding: 0.55rem 0.85rem;">
+                            <strong style="font-size: 0.88rem;">Updated Next Action:</strong>
+                            <span style="font-size: 0.9rem;"> {f.next_action}</span>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -1236,19 +1236,19 @@ def render_workspace_view(
             # Status Banner & Metadata Header
             st.markdown(
                 f"""
-                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem;">
+                <div class="packet-banner" style="margin-bottom: 1rem; padding: 1rem 1.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <span style="font-size: 1.25rem; font-weight: 800; color: #1e3a8a;">AdmitSense Review Packet</span><br>
-                            <span style="font-size: 0.85rem; color: #64748b;">
+                            <span style="font-size: 1.25rem; font-weight: 800; color: #2563eb;">AdmitSense Review Packet</span><br>
+                            <span style="font-size: 0.85rem;">
                                 Packet ID: <code>{selected_export_packet.packet_id}</code> &bull; Version: <strong>v{selected_export_packet.packet_version}</strong> &bull; Run: <code>{selected_export_packet.run_id}</code>
                             </span>
                         </div>
                         <div style="text-align: right;">
-                            <span style="background-color: {'#16a34a' if selected_export_packet.review_status == 'complete' else '#ea580c'}; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem;">
+                            <span style="background-color: {'#16a34a' if selected_export_packet.review_status == 'complete' else '#ea580c'}; color: white !important; padding: 0.25rem 0.75rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem;">
                                 {selected_export_packet.review_status.upper()}
                             </span><br>
-                            <span style="font-size: 0.75rem; color: #94a3b8;">{selected_export_packet.generated_at.strftime('%d %b %Y, %H:%M:%S UTC')}</span>
+                            <span style="font-size: 0.75rem;">{selected_export_packet.generated_at.strftime('%d %b %Y, %H:%M:%S UTC')}</span>
                         </div>
                     </div>
                 </div>
@@ -1293,16 +1293,16 @@ def render_workspace_view(
                     rec = hosp_result.record
                     st.markdown(
                         f"""
-                        <div style="background-color: #faf5ff; border: 1px solid #d8b4fe; border-left: 5px solid #8b5cf6; border-radius: 6px; padding: 0.75rem 1rem;">
-                            <span style="background-color: #f3e8ff; color: #6b21a8; font-weight: 700; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">SYNTHETIC DEMONSTRATION DATA</span>
-                            <h4 style="margin: 0.25rem 0 0.1rem 0;">{rec.hospital_name}</h4>
-                            <div style="font-size: 0.85rem; color: #475569;">
+                        <div class="hospital-box">
+                            <span style="background-color: rgba(168, 85, 247, 0.2); color: #7e22ce; font-weight: 700; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <h4>{rec.hospital_name}</h4>
+                            <div style="font-size: 0.85rem;">
                                 City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Tier: <strong>{rec.network_tier.upper().replace('_', ' ')}</strong> &bull; TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
                             </div>
-                            <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.35rem;">
+                            <div style="font-size: 0.8rem; margin-top: 0.35rem;">
                                 Dataset Version: <strong>{rec.dataset_version}</strong> &bull; Date: {rec.dataset_date.strftime('%d %b %Y')}
                             </div>
-                            <div style="font-size: 0.8rem; color: #6b21a8; background-color: #f3e8ff; padding: 0.45rem 0.65rem; border-radius: 4px; margin-top: 0.5rem;">
+                            <div style="font-size: 0.8rem; color: #7c3aed; background-color: rgba(139, 92, 246, 0.12); padding: 0.45rem 0.65rem; border-radius: 4px; margin-top: 0.5rem;">
                                 ⚠️ <strong>Notice:</strong> Synthetic hospital directory match does NOT verify live insurer network agreement, cashless eligibility, or claim approval.
                             </div>
                         </div>
@@ -1332,13 +1332,13 @@ def render_workspace_view(
                     f_color = "#16a34a" if f.status == "supported" else ("#ea580c" if f.status == "unresolved" else "#dc2626")
                     st.markdown(
                         f"""
-                        <div style="border: 1px solid #e2e8f0; border-left: 4px solid {f_color}; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; background: white;">
+                        <div class="finding-preview-box" style="border-left: 5px solid {f_color} !important;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <strong>Rev {f.revision} &bull; {f.topic}</strong>
-                                <span style="font-weight: 700; font-size: 0.75rem; color: {f_color}; text-transform: uppercase;">{f.status}</span>
+                                <span style="font-weight: 700; font-size: 0.75rem; color: {f_color} !important; text-transform: uppercase;">{f.status}</span>
                             </div>
-                            <p style="margin: 0.4rem 0 0.4rem 0; font-size: 0.9rem;">{f.conclusion}</p>
-                            <div style="font-size: 0.85rem; color: #166534; background: #f0fdf4; padding: 0.4rem 0.6rem; border-radius: 4px;">
+                            <p style="margin: 0.4rem 0 0.4rem 0; font-size: 0.92rem;">{f.conclusion}</p>
+                            <div style="font-size: 0.85rem; color: #166534; background: rgba(34, 197, 94, 0.12); padding: 0.45rem 0.65rem; border-radius: 4px;">
                                 <strong>Next Action:</strong> {f.next_action}
                             </div>
                         </div>
