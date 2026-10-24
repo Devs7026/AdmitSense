@@ -210,4 +210,53 @@ Verification Results:
 Limitations & Delivery State:
 - Milestone M6-B and M6-I completely implemented, integrated with Owner A's M6-A HTML exporter, and verified on main.
 - Review export consumes static snapshots without model invocation; HTML rendering and download button verified in UI and tests.
-- Milestone M7 has NOT been started.
+
+---
+
+## Milestone M7 Completion: Live LLM Integration, Story Evaluation & Safety Invariants (Owner B)
+
+Delivered on Feature Branch: `feat/m7-evaluation-and-demo`
+
+### 1. Live LLM Integration Architecture & Diagnostics
+- **Client Implementation**: `src/admitsense/agent/llm.py` (`GroqReviewClient`, `MissingCredentialsError`, `LLMProviderError`).
+- **Provider & Model**: Groq API using `llama-3.3-70b-versatile` (configurable via `GROQ_MODEL`).
+- **Required Variable**: `GROQ_API_KEY`.
+- **Credential Transparency**: If `GROQ_API_KEY` is not present, `GroqReviewClient.is_available` returns `False`, `evaluate_clause_applicability` raises `MissingCredentialsError` on direct invocation, and `BoundedReviewAgent` reports `credentials_configured: False` in `agent.llm_status` while executing transparent deterministic rules. **NO silent mock fallback exists**.
+- **Provider Failure Handling**: Provider timeouts, rate limits (HTTP 429), or network errors are caught as `LLMProviderError`; the runner logs a diagnostic notice and continues via deterministic rules rather than crashing.
+- **Physical Grounding Rule**: Every LLM-suggested candidate quote must be a verbatim substring of physical page text and verified via `retrieval.verify_citation`. Hallucinated quotes are strictly rejected.
+
+### 2. Evaluation of the Three Required Stories
+1. **Story 1 (Applicable Endorsement)**:
+   - Initial review of Total Knee Replacement against base policy yields Revision 1 finding (`status="unresolved"`, 24 months vs 18 months continuous coverage).
+   - Endorsement schedule uploaded reducing waiting period to 12 months (matches policy ID, member name, and effective date before planned admission).
+   - Replay review yields Revision 2 finding (`status="supported"`), updates next action to hospital pre-admission estimate, and preserves Revision 1 snapshot in SQLite.
+2. **Story 2 (Mismatched / Conflicting Evidence)**:
+   - Endorsement with mismatched policy ID (`POL-OTHER-999`) or ambiguous precedence language is marked `not_applicable` or `uncertain`.
+   - Base 24-month waiting period is **NOT** overridden.
+3. **Story 3 (Unreadable PDF)**:
+   - Corrupt scan with zero extractable text is flagged with `extraction_status="unreadable"`.
+   - Document applicability records `uncertain` status with explicit extraction failure reason.
+   - Zero invented findings or hallucinated citations.
+
+### 3. Failure & Safety Invariants Verified
+- **Invalid references**: Citations with missing documents, wrong versions, out-of-bounds pages, or altered quotes rejected.
+- **Cross-case access**: Rejected; zero crossover between case documents.
+- **Missing dates**: Unknown admission date with future endorsement retains `uncertain` status.
+- **Future endorsements**: Endorsement effective after planned admission date rejected (`not_applicable`).
+- **Duplicate evidence**: Replaying identical evidence produces 0 new revisions.
+- **Prompt injection**: Injected directives in documents treated as passive evidence; `authorization_status` strictly remains `"not verified"`.
+- **Tool failures**: Consume budget, record `status="failed"` event, runner continues safely.
+- **Timeout**: Microsecond timeout cleanly stops review with `stopped_reason="timeout"`, `review_status="incomplete"`.
+- **Tool cap**: Strictly `<= 8` tool calls across all execution paths.
+- **Authorization invariant**: `authorization_status` is ALWAYS `"not verified"`.
+
+### 4. Verification Evidence
+- `tests/test_m7_agent_evaluation.py`: **18/18 tests passed** in 6.70s.
+- `tests/verify_m7.py`: **16/16 acceptance checks passed**.
+- Full repository test suite: **146/146 tests passed** in 19.92s.
+- Verification scripts `verify_m1.py` through `verify_m7.py` all passing.
+
+### 5. Remaining Limitations & Boundaries
+- Success on three synthetic cases demonstrates architectural safety and correctness, **not** production readiness for live hospital admissions. Real policies feature multi-column layouts, tables, and varied wording requiring continuous validation.
+- Missing `GROQ_API_KEY` prevents live external model calls in local testing; provider integration is ready to activate immediately upon setting the key.
+

@@ -454,6 +454,43 @@ def compute_evidence_replay(
 - **Owner B (Agent / Review)**: Pure deterministic & LLM logic. Generates and validates `ReviewPacket`, `Finding`, `Revision`, and `ToolActivityEvent`. Does not write to SQLite or disk directly.
 - **Owner A (Storage / UI)**: Invokes `ReviewRunner.run_review`, streams `ToolActivityEvent` to the Streamlit UI, rejects stale reviews, and commits the resulting `ReviewPacket` to SQLite via `ReviewRepository.save_review_packet`.
 
+### 3.7 LLM Provider & Grounding Contract (Milestone M7)
+Owner B implements live model inference using the Groq API:
+
+```python
+class LLMReviewClient(Protocol):
+    @property
+    def is_available(self) -> bool:
+        """Returns True only when groq SDK is present and non-empty GROQ_API_KEY is configured."""
+        ...
+
+    @property
+    def status_summary(self) -> dict[str, Any]:
+        """Provides diagnostic metadata regarding provider, model, and credential presence."""
+        ...
+
+    def evaluate_clause_applicability(
+        self,
+        case_procedure: str,
+        clause_text: str,
+        document_name: str,
+        page_number: int,
+    ) -> dict[str, Any]:
+        """Evaluates clause applicability.
+        Raises MissingCredentialsError if GROQ_API_KEY is not configured.
+        Raises LLMProviderError on network, quota, or rate-limit failure.
+        """
+        ...
+```
+
+**Non-Negotiable LLM Invariants**:
+1. **Configured Model**: Defaults to `llama-3.3-70b-versatile`, customizable via environment variable `GROQ_MODEL`.
+2. **Credential Requirement**: Environment variable `GROQ_API_KEY`.
+3. **Transparent Credential Diagnostics**: Missing `GROQ_API_KEY` is transparently reported via `status_summary["credentials_configured"] = False`. The system NEVER silently fakes live LLM invocation or invents model responses.
+4. **Resilient Failure Handling**: Network timeouts and provider errors (`LLMProviderError`) do not crash the review runner; the agent falls back safely to deterministic rule-based evaluation.
+5. **Strict Grounding Rule**: Every quote or clause suggested by an LLM is verified against physical document page text using `verify_citation`. Fabricated or hallucinated quotes are rejected.
+6. **Authorization Invariant**: Model inference is strictly advisory and administrative; `authorization_status` is ALWAYS `"not verified"`. Pre-authorization guarantees and cashless approval inferences are forbidden.
+
 ---
 
 ## 4. ID Assignment & Ownership Matrix

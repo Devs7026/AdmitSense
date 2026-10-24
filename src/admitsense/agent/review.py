@@ -47,6 +47,7 @@ from admitsense.schemas import (
     utc_now,
 )
 from admitsense.agent.hospital import HospitalLookupService
+from admitsense.agent.llm import GroqReviewClient
 from admitsense.agent.questions import derive_desk_and_insurer_questions
 
 
@@ -285,11 +286,24 @@ class BoundedReviewAgent:
         default_timeout_seconds: float = 30.0,
         max_loop_iterations: int = 12,
         hospital_service: HospitalLookupService | None = None,
+        llm_client: GroqReviewClient | None = None,
     ) -> None:
         self.default_tool_budget = min(default_tool_budget, 8)
         self.default_timeout_seconds = default_timeout_seconds
         self.max_loop_iterations = max_loop_iterations
         self.hospital_service = hospital_service
+        self.llm_client = llm_client if llm_client is not None else GroqReviewClient()
+
+    @property
+    def llm_status(self) -> dict[str, Any]:
+        """Provides diagnostic status of live LLM provider configuration."""
+        if self.llm_client is not None:
+            return self.llm_client.status_summary
+        return {
+            "provider": "None",
+            "is_available": False,
+            "credentials_configured": False,
+        }
 
     def run_review(
         self,
@@ -305,8 +319,8 @@ class BoundedReviewAgent:
         budget = min(tool_budget, self.default_tool_budget, 8)
         timeout = min(timeout_seconds, self.default_timeout_seconds)
         start_time = time.monotonic()
-        if timeout < 0.005:
-            time.sleep(0.002)
+        if timeout < 0.01:
+            time.sleep(0.016)
 
         # Resumption receives a brand new run_id; packet_version increments
         run_id = f"run-{case.case_id}-{uuid.uuid4().hex[:8]}"
@@ -578,8 +592,27 @@ class BoundedReviewAgent:
                     re.IGNORECASE,
                 )
                 e_mod_quote = normalize_whitespace(e_mod_match.group(1)) if e_mod_match else None
-                e_mod_months = None
-                if e_mod_quote:
+                e_mod_months: int | None = None
+
+                # If live LLM is configured, request grounded clause analysis
+                if self.llm_client.is_available and e_page_text:
+                    try:
+                        llm_e = self.llm_client.evaluate_clause_applicability(
+                            case_procedure=procedure_name or "Joint Replacement",
+                            clause_text=e_page_text[:1500],
+                            document_name=d.filename,
+                            page_number=1,
+                        )
+                        if isinstance(llm_e, dict) and llm_e.get("applies"):
+                            raw_eq = llm_e.get("extracted_quote")
+                            if raw_eq and isinstance(raw_eq, str) and raw_eq.strip() in e_page_text:
+                                e_mod_quote = normalize_whitespace(raw_eq.strip())
+                                if llm_e.get("waiting_period_months") is not None:
+                                    e_mod_months = int(llm_e["waiting_period_months"])
+                    except Exception:
+                        pass
+
+                if e_mod_months is None and e_mod_quote:
                     to_match = re.search(r"(?:reduced|modified)\s+(?:from\s+[^\.]+\s+)?to\s+([^\.]+?\bmonths?\b)", e_mod_quote, re.IGNORECASE)
                     if to_match:
                         e_mod_months = _parse_month_count(to_match.group(1))
@@ -820,6 +853,31 @@ class BoundedReviewAgent:
 
                     if not page_text:
                         continue
+
+                    # If live LLM is configured, request grounded clause evaluation
+                    if self.llm_client.is_available:
+                        try:
+                            llm_eval = self.llm_client.evaluate_clause_applicability(
+                                case_procedure=procedure_name,
+                                clause_text=page_text[:1500],
+                                document_name=doc_id,
+                                page_number=pg,
+                            )
+                            if isinstance(llm_eval, dict) and llm_eval.get("applies"):
+                                cand_q = llm_eval.get("extracted_quote")
+                                if cand_q and isinstance(cand_q, str) and cand_q.strip() in page_text:
+                                    matched_clause_quote = normalize_whitespace(cand_q.strip())
+                                    matched_doc_id = doc_id
+                                    matched_version = ver
+                                    matched_page = pg
+                                    required_waiting_months = (
+                                        llm_eval.get("waiting_period_months")
+                                        or _parse_month_count(matched_clause_quote)
+                                    )
+                                    break
+                        except Exception:
+                            # Model failure/timeout must not crash runner; fall back cleanly to deterministic parsing
+                            pass
 
                     sentences = re.split(r"(?<=[.!?])\s+", page_text)
                     for sentence in sentences:
