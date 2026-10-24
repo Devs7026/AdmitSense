@@ -79,6 +79,7 @@ def render_workspace_view(
 
     # Fetch latest persisted ReviewPacket from SQLite for this case
     persisted_packet = r_repo.get_latest_review_packet(case.case_id)
+    documents = storage.list_documents(case.case_id)
 
     # Top Navigation Row
     top_c1, top_c2, top_c3, top_c4 = st.columns([2, 4, 2, 2])
@@ -1320,7 +1321,8 @@ def render_workspace_view(
             with st.expander(f"📄 3. Documents Reviewed ({len(documents)})", expanded=False):
                 if documents:
                     for d in documents:
-                        st.markdown(f"- **{d.filename}** (`{d.document_id}`, {d.version}) — {d.page_count} pages [{d.extraction_status}]")
+                        pages_cnt = getattr(d, "total_pages", getattr(d, "page_count", len(getattr(d, "pages", []))))
+                        st.markdown(f"- **{d.filename}** (`{d.document_id}`, {d.version}) — {pages_cnt} pages [{d.extraction_status}]")
                 else:
                     st.caption("No document records attached.")
 

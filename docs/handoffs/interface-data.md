@@ -1,85 +1,56 @@
-Updated: 2026-10-24T15:38:00+05:30
-Owner / task: OWNER A / M6-A & Interface/Export side of M6-I (Hospital Reference Display & Deterministic HTML Packet Export)
-Branch / implementation commit or PR: main (merge commit fe0e353)
-Delivery state: integrated
+Updated: 2026-10-24T16:32:00+05:30
+Owner / task: OWNER A / M7-A & M7-I (End-to-End User Journey Verification, Documentation, and Demonstration Runbook)
+Branch / implementation commit or PR: main (feat/m7-end-to-end-verification)
+Delivery state: merged
 Implemented:
-1. Hospital Information Display (`src/admitsense/documents/hospital_directory.py` & UI):
-   - Created `LocalSyntheticHospitalDirectory` implementing `HospitalLookupService` protocol conforming to CONTRACTS.md Section 2.6 and Section 3.4.
-   - Evaluates hospital facilities against dated synthetic demonstration records (`v2026.1`, `2026-10-01`).
-   - Supports all 4 required matching states:
-     - `matched`: Displays facility name, city, network tier (`tier_1`, `tier_2`, `non_network`), TPA contact, record ID, dataset version, and date.
-     - `no_match`: Displays clear notice when a facility is not in the synthetic dataset.
-     - `ambiguous_match`: Identifies multiple candidate facilities matching the query and prompts for exact name.
-     - `missing_information`: Explains that hospital facility has not been entered in case details.
-   - Non-Authorisation Invariant strictly enforced: Prominently displays notice that directory match does NOT verify live insurer network status, cashless eligibility, or claim approval.
-   - Integrated into both `tab_facts` and `tab_export` in the Streamlit workspace view.
+1. Complete 10-Step Caregiver User Journey Verification (`tests/test_m7_journey.py` & `tests/verify_m7.py`):
+   - Step 1: Case creation with partial/available facts (preserving None for unknowns, provenance=user_provided).
+   - Step 2: Ingesting synthetic policy wording (`Care_Health_Gold_Policy_Wording.pdf`, 15 pages, blank page 7 preserved) and renewal schedule (`Policy_Renewal_Schedule.pdf`, 2 pages).
+   - Step 3: Starting real bounded agent review run (strictly <= 8 tool calls, honest status='incomplete', authorization='not verified').
+   - Step 4: Inspecting findings and verifying exact citations (physical 1-based page 14 of policy wording, exact quote verified against extracted text).
+   - Step 5: Recording user follow-up answers with `FactSource(source_type="user_provided")` provenance.
+   - Step 6: Uploading applicable endorsement (`Joint_Replacement_Endorsement.pdf`) without mutating or deleting earlier documents or version histories.
+   - Step 7: Reassessment with Evidence Change Replay (Revision 1 -> Revision 2: unresolved -> supported), older packet v1 snapshot permanently immutable.
+   - Step 8: Updated next actions and dynamic question pruning (obsolete waiting period questions removed; unresolved gaps preserved).
+   - Step 9: Standalone HTML review packet export directly from snapshot v2 with full HTML escaping, print CSS, and zero local filesystem paths.
+   - Step 10: Application restart simulation with complete SQLite lifecycle persistence across fresh database sessions.
 
-2. Review Packet Preview (`src/admitsense/ui/workspace_view.py`):
-   - Implemented full `tab_export` ("📥 Review Packet Preview & Deterministic Export"):
-     - Snapshot Version Selector: Allows caregivers to select which historical packet version (`v1`, `v2`, etc.) to inspect and export from SQLite storage.
-     - Metadata Header: Packet ID, Version, Run ID, Generation Time, and Review Status badge.
-     - Mandatory Authorisation Banner: Strictly defaults to `"not verified"` with domain boundary explanation.
-     - Incomplete Review Warning: Prominently highlights partial execution stop reasons, stop details, and limitations.
-     - Case & Admission Summary: Patient, policy ID, procedure, planned admission date, coverage start, estimated cost.
-     - Synthetic Hospital Display: Live directory card showing status, tier, contact, and disclaimers.
-     - Documents Reviewed: Table of reviewed files, versions, and extraction statuses.
-     - Administrative Findings: Topic cards with revision badges, status, conclusion, next action, and exact blockquote physical page citations.
-     - Missing Evidence Checklist: Table of requested items, rationale, suggested sources, and resolution statuses.
-     - Questions for Hospital Admission Desk & Insurer: Concrete actionable questions list for desk staff and TPA.
-     - Revision Audit Trail: Full chronological history of finding revisions, trigger types, and triggering evidence quotes.
+2. Edge Cases, Isolation & Invariant Enforcement:
+   - Case Isolation: Cases remain strictly isolated; Case B cannot see or mutate Case A's documents, facts, or review packets.
+   - Duplicate Uploads: Exact SHA-256 match returns existing record with `is_duplicate=True`; updated content increments immutable version (`v1` -> `v2`).
+   - Unreadable Scanned PDFs: Extracted with status `'unreadable'`, zero invented findings or fake coverage claims; partial review workflow remains accessible.
+   - Hospital Reference Lookup: Verified all 4 states (`matched`, `no_match`, `ambiguous_match`, `missing_information`).
+   - Synthetic Data Transparency: Explicit synthetic labelling (`v2026.1`, `2026-10-01`) and boundary disclaimers present in UI, packet, and export.
+   - Non-Authorisation Invariant: Authorization strictly defaults to `'not verified'`.
+   - Tool Budget & Timeouts: Budget capped at <= 8 tool executions; timeouts report honest `'timeout'` stop reason while preserving validated partial findings.
+   - Concurrency & Rollback: Stale reviews rejected via `StaleReviewError`; failed saves roll back cleanly.
 
-3. Deterministic HTML Packet Download (`src/admitsense/export/html_exporter.py`):
-   - Implemented pure function `generate_review_packet_html`:
-     - Renders a standalone, self-contained HTML5 document directly from a saved `ReviewPacket` snapshot.
-     - Deterministic export: ZERO live model calls, reassessments, or database writes during generation.
-     - Security: Complete HTML escaping (`html.escape`) of all dynamic user, document, model, and hospital strings (safe against script injection / XSS).
-     - Export Safety: No secrets, machine paths (`C:\Users\`, `/tmp/`), or local `file:///` URLs.
-     - Modern Styling: Clean typography, status color badges, responsive layout, and dedicated `@media print` stylesheet for clean printing / PDF saving.
-     - Download Button: `st.download_button` generating `review_packet_{case_id}_v{packet_version}.html`. Preview and download strictly represent the exact same packet version.
+3. Project Documentation & Demonstration Runbook:
+   - Authored `README.md`:
+     - System overview and domain boundaries.
+     - Prerequisites (Python 3.10+) and dependency installation commands.
+     - Required environment variable names without secrets.
+     - Exact launch commands for Streamlit and verification suites.
+     - Synthetic fixture locations and descriptions.
+     - Repeatable clean-demo procedures preserving existing cases.
+     - Transparent known limitations.
+   - Authored `docs/DEMO_RUNBOOK.md`:
+     - Story 1: Applicable Endorsement (cited initial shortfall -> upload endorsement -> validated change -> updated next actions and export).
+     - Story 2: Mismatched/Conflicting Evidence (contradictory precedence retains conflict finding and questions without override).
+     - Story 3: Unreadable PDF (explicit unreadable extraction status, zero invented findings, partial review preserved).
 
 Interfaces changed:
-- Added `HospitalRecordReference` schema in `src/admitsense/schemas.py`.
-- Added optional `hospital_record: HospitalRecordReference | None = None` to `ReviewPacket` in `src/admitsense/schemas.py`.
-- Added module `src/admitsense/documents/hospital_directory.py` exporting `HospitalMatchStatus`, `HospitalLookupResult`, `HospitalLookupService`, and `LocalSyntheticHospitalDirectory`.
-- Added module `src/admitsense/export/html_exporter.py` and exported `generate_review_packet_html` in `src/admitsense/export/__init__.py`.
-- Updated `docs/CONTRACTS.md` adding Section 2.6 and marking Section 3.4 as AGREED.
+- No shared schema modifications needed; full backward compatibility with Milestone M1-M6 interfaces preserved.
+- Added test suites `tests/test_m7_journey.py` and `tests/verify_m7.py`.
 
 Checks and results:
-- `pytest tests/test_m6_export.py -v` -> 7/7 passed in 0.55s:
-  - Export is deterministic and contains complete snapshot data.
-  - Special characters and script tags escaped safely.
-  - Zero secrets, internal paths, or broken links in export.
-  - Incomplete packets retain visible limitations and stop reasons.
-  - Historical packets retain original findings across subsequent revisions.
-  - Hospital directory states (matched, no_match, ambiguous, missing) and synthetic disclaimers verified.
-  - Authorization status strictly remains 'not verified'.
-- `python tests/verify_m6.py` -> 9/9 verification checks passed:
-  - Hospital directory lookup states verified.
-  - Synthetic dataset transparency and non-authorisation disclaimer present.
-  - Snapshot construction with findings, citations, checklist, questions, and revisions verified.
-  - Deterministic HTML generation verified.
-  - Complete HTML escaping verified.
-  - Export safety (no internal paths or file:// links) verified.
-  - Incomplete review export with visible limitations verified.
-  - Historical packet snapshot immutability verified.
-  - Standalone HTML document structure valid.
-- `pytest` (full test suite) -> 114/114 passed across entire repository in 15.17s.
-- Milestone regression scripts:
-  - `python tests/verify_m1.py` -> 5/5 passed.
-  - `python tests/verify_m2.py` -> 8/8 passed.
-  - `python tests/verify_m3.py` -> 8/8 passed.
-  - `python tests/verify_m4.py` -> 15/15 passed.
-  - `python tests/verify_m5.py` -> 16/16 passed.
-  - `python tests/verify_m6.py` -> 9/9 passed.
+- `pytest tests/test_m7_journey.py -v`: 6/6 passed in 2.51s.
+- `python tests/verify_m7.py`: All 21 combined acceptance checks passed.
+- `pytest -q`: 134/134 tests passed in 14.00s.
+- `python tests/verify_m1.py` through `tests/verify_m6.py`: All milestone verification suites pass cleanly.
 
 Mocks / limitations / blockers:
-- Owner A interface & export side is complete without mocks.
-- `LocalSyntheticHospitalDirectory` provides the agreed directory lookup adapter for UI preview and export.
-- Did not implement Owner B's review runner lookup tool or question-generation logic (`M6-B`).
+- Zero blockers. All features are integrated and verified against actual SQLite database and bounded review agent.
 
-Next action for other owner (Owner B):
-- Implement M6-B in `src/admitsense/agent/review.py`:
-  - Hospital lookup tool (`lookup_hospital`) providing `HospitalRecordReference` with synthetic record ID, dataset version (`v2026.1`), and publication date (`2026-10-01`).
-  - Structured desk questions generation for admission desk and insurer.
-  - Validate output wording for limitations and unresolved conditions.
-  - When integrated, `generate_review_packet_html` and the workspace preview will seamlessly render Owner B's live hospital lookups and desk questions from the persisted packet.
+Next action for other owner:
+- Owner B: Review M7-A verification results, rehearse demo runbook stories, and integrate into main.

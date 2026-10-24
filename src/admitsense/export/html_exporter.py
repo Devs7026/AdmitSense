@@ -102,7 +102,7 @@ def generate_review_packet_html(
                     <td><code>{_esc(doc.document_id)}</code></td>
                     <td>{_esc(doc.version)}</td>
                     <td><span class="badge badge-default">{_esc(doc.extraction_status)}</span></td>
-                    <td>{_esc(doc.page_count)} pages</td>
+                    <td>{_esc(getattr(doc, 'total_pages', getattr(doc, 'page_count', 0)))} pages</td>
                 </tr>"""
             )
     else:
