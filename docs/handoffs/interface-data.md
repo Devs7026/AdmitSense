@@ -1,7 +1,7 @@
-Updated: 2026-10-24T14:10:00+05:30
+Updated: 2026-10-24T14:31:00+05:30
 Owner / task: OWNER A / M5-A & Interface/Storage side of M5-I (Evidence Change Replay & Immutable Snapshots)
-Branch / implementation commit or PR: feat/m5-evidence-replay-and-diff
-Delivery state: ready for review (awaiting teammate review and merge authorisation)
+Branch / implementation commit or PR: main (merge commit d1e7347)
+Delivery state: integrated
 Implemented:
 1. Replay Delta Computation (`src/admitsense/review/replay.py`):
    - Implemented `compute_evidence_replay(prior_packet, new_findings, trigger_type, triggering_evidence, changed_case_facts, reason)` matching agreed CONTRACTS.md Section 3.5.
