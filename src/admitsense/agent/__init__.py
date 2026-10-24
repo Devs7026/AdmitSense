@@ -12,12 +12,14 @@ from admitsense.agent.retrieval import (
     normalize_whitespace,
 )
 from admitsense.agent.review import (
+    BoundedReviewAgent,
     ToolActivityEvent,
     WaitingPeriodReviewer,
     run_waiting_period_review,
 )
 
 __all__ = [
+    "BoundedReviewAgent",
     "CitationVerificationResult",
     "DocumentRecord",
     "DocumentUnreadableError",

@@ -33,9 +33,11 @@ class FixtureReviewRunner:
         case: CaseDetails,
         retrieval: SqliteEvidenceRetrieval,
         prior_packet: ReviewPacket | None = None,
+        user_answers: dict[str, Any] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
         event_callback: Callable[[dict], None] | None = None,
+        **kwargs: Any,
     ) -> ReviewPacket:
         run_id = f"run-{uuid.uuid4().hex[:8]}"
         packet_version = (prior_packet.packet_version + 1) if prior_packet else 1
@@ -253,6 +255,7 @@ class ReviewService:
     def execute_review(
         self,
         case_id: str,
+        user_answers: dict[str, Any] | None = None,
         event_callback: Callable[[Any], None] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
@@ -287,12 +290,17 @@ class ReviewService:
                 case=case,
                 retrieval=self.retrieval,
                 prior_packet=prior_packet,
+                user_answers=user_answers,
                 tool_budget=bounded_budget,
                 timeout_seconds=timeout_seconds,
                 event_callback=persisting_callback,
             )
             # Check tool budget enforcement
-            if packet.tool_steps_used >= bounded_budget and packet.review_status != "complete":
+            if (
+                packet.tool_steps_used >= bounded_budget
+                and packet.review_status != "complete"
+                and packet.stopped_reason not in {"missing_information", "timeout"}
+            ):
                 packet = packet.model_copy(
                     update={
                         "stopped_reason": "tool_limit_reached",
@@ -329,3 +337,19 @@ class ReviewService:
         saved_packet = self.review_repo.save_review_packet(packet)
         return saved_packet
 
+    def resume_review(
+        self,
+        case_id: str,
+        user_answers: dict[str, Any] | None = None,
+        event_callback: Callable[[Any], None] | None = None,
+        tool_budget: int = 8,
+        timeout_seconds: float = 30.0,
+    ) -> ReviewPacket:
+        """Explicit resumption of an existing review using user answers / saved facts."""
+        return self.execute_review(
+            case_id=case_id,
+            user_answers=user_answers,
+            event_callback=event_callback,
+            tool_budget=tool_budget,
+            timeout_seconds=timeout_seconds,
+        )
