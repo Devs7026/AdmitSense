@@ -15,6 +15,7 @@ from admitsense.agent.review import (
     BoundedReviewAgent,
     ToolActivityEvent,
     WaitingPeriodReviewer,
+    compute_evidence_replay,
     run_waiting_period_review,
 )
 
@@ -30,6 +31,7 @@ __all__ = [
     "PageSearchResult",
     "ToolActivityEvent",
     "WaitingPeriodReviewer",
+    "compute_evidence_replay",
     "normalize_whitespace",
     "run_waiting_period_review",
 ]

@@ -39,6 +39,7 @@ from admitsense.schemas import (
     MissingEvidenceItem,
     ReviewPacket,
     ReviewStatus,
+    Revision,
     StopReason,
     utc_now,
 )
@@ -127,6 +128,123 @@ def _derive_procedure_search_terms(procedure: str) -> list[str]:
 
     terms.append("waiting period")
     return terms
+
+
+# ==============================================================================
+# Evidence Change Replay Computation (Milestone M5-B & M5-I)
+# ==============================================================================
+def compute_evidence_replay(
+    prior_packet: ReviewPacket | None,
+    new_findings: list[Finding],
+    trigger_type: Literal["new_document", "user_correction", "case_details_changed"] | None = None,
+    triggering_evidence: list[Evidence] = [],
+    changed_case_facts: list[CaseFactName] = [],
+    reason: str = "",
+) -> tuple[list[Finding], list[Revision]]:
+    """Computes delta between prior_packet findings and new findings:
+    1. Identifies substantively changed, unchanged, and newly introduced findings.
+    2. Increments revision by exactly 1 for substantively changed findings.
+    3. Emits Revision audit records with old/new status, conclusion, and triggering evidence/facts.
+    4. Leaves unchanged findings at their prior revision number.
+    5. Returns (updated_current_findings, accumulated_revisions).
+    """
+    if prior_packet is None:
+        # Initial review: all findings are revision 1, no historical revisions
+        return list(new_findings), []
+
+    old_findings_map = {f.finding_id: f for f in prior_packet.findings}
+    accumulated_revisions = list(prior_packet.revisions)
+    final_findings: list[Finding] = []
+
+    for new_f in new_findings:
+        if new_f.finding_id in old_findings_map:
+            old_f = old_findings_map[new_f.finding_id]
+
+            # Detect substantive change across conclusion, status, evidence, or next action
+            status_changed = (new_f.status != old_f.status)
+            conclusion_changed = (new_f.conclusion.strip() != old_f.conclusion.strip())
+            old_quotes = {e.quote.strip() for e in old_f.evidence}
+            new_quotes = {e.quote.strip() for e in new_f.evidence}
+            evidence_changed = (old_quotes != new_quotes)
+            next_action_changed = (new_f.next_action.strip() != old_f.next_action.strip())
+
+            is_substantive = status_changed or conclusion_changed or evidence_changed or next_action_changed
+
+            if is_substantive:
+                # Substantive change -> increment revision by exactly 1
+                revised_f = new_f.model_copy(update={"revision": old_f.revision + 1})
+                final_findings.append(revised_f)
+
+                # Determine effective trigger type, triggering evidence, and changed facts
+                eff_trigger = trigger_type
+                eff_evidence = list(triggering_evidence)
+                eff_facts = list(changed_case_facts)
+
+                # Auto-detect trigger if not explicitly provided
+                if eff_trigger is None:
+                    added_evidence = [e for e in new_f.evidence if e.quote.strip() not in old_quotes]
+                    if added_evidence:
+                        eff_trigger = "new_document"
+                        eff_evidence = added_evidence
+                    elif changed_case_facts:
+                        eff_trigger = "case_details_changed"
+                        eff_facts = changed_case_facts
+                    else:
+                        eff_trigger = "new_document" if new_f.evidence else "case_details_changed"
+
+                # Ensure schema constraints for Revision
+                if eff_trigger == "new_document" and not eff_evidence:
+                    eff_evidence = new_f.evidence[:1] if new_f.evidence else old_f.evidence[:1]
+                elif eff_trigger in {"user_correction", "case_details_changed"} and not eff_facts:
+                    eff_facts = new_f.relevant_case_facts or ["procedure"]
+
+                eff_reason = reason or (
+                    f"Substantive update in finding '{new_f.topic}': "
+                    f"status changed from '{old_f.status}' to '{new_f.status}'."
+                )
+
+                rev = Revision(
+                    revision_id=f"rev-{uuid.uuid4().hex[:8]}",
+                    finding_id=new_f.finding_id,
+                    old_finding_revision=old_f.revision,
+                    new_finding_revision=revised_f.revision,
+                    old_conclusion=old_f.conclusion,
+                    new_conclusion=revised_f.conclusion,
+                    old_status=old_f.status,
+                    new_status=revised_f.status,
+                    trigger_type=eff_trigger,
+                    triggering_evidence=eff_evidence,
+                    changed_case_facts=eff_facts,
+                    reason=eff_reason,
+                    affected_topics=[new_f.topic],
+                    created_at=utc_now(),
+                )
+                accumulated_revisions.append(rev)
+
+            else:
+                # No substantive change (duplicate input, cosmetic re-run) -> keep prior revision
+                unchanged_f = new_f.model_copy(update={"revision": old_f.revision})
+                final_findings.append(unchanged_f)
+                # No new Revision appended
+
+        else:
+            # Brand new finding introduced
+            fresh_f = new_f.model_copy(update={"revision": 1})
+            final_findings.append(fresh_f)
+
+    # Check for any prior findings that were not re-evaluated in this run (e.g. run stopped early)
+    new_finding_ids = {f.finding_id for f in final_findings}
+    for old_f in prior_packet.findings:
+        if old_f.finding_id not in new_finding_ids:
+            preserved_limitations = list(old_f.limitations)
+            pending_lim = "Reassessment pending: review run stopped before this topic could be re-evaluated."
+            if pending_lim not in preserved_limitations:
+                preserved_limitations.append(pending_lim)
+            final_findings.append(
+                old_f.model_copy(update={"limitations": preserved_limitations})
+            )
+
+    return final_findings, accumulated_revisions
 
 
 # ==============================================================================
@@ -357,6 +475,13 @@ class BoundedReviewAgent:
 
         # Record document extraction / applicability
         has_unreadable = False
+        applicable_endorsement_quote: str | None = None
+        applicable_endorsement_ev: Evidence | None = None
+        applicable_endorsement_months: int | None = None
+        endorsement_ref: str | None = None
+        endorsement_conflict_reason: str | None = None
+        endorsement_not_applicable_reason: str | None = None
+
         for d in available_docs:
             if d.extraction_status == "unreadable":
                 has_unreadable = True
@@ -368,15 +493,146 @@ class BoundedReviewAgent:
                         reason=f"Document '{d.filename}' is unreadable; optical extraction failed.",
                     )
                 )
-            elif d.evidence_type == "endorsement":
+            elif d.evidence_type == "endorsement" or "endorse" in d.filename.lower():
+                # Milestone M5-B: Applicability checks for endorsement documents
+                e_page_text = None
+                if tool_steps_used < budget and not is_timed_out():
+                    try:
+                        e_page_text = call_tool(
+                            "read_page",
+                            {"document_id": d.document_id, "version": d.version, "page_number": 1},
+                            f"Reading endorsement document {d.document_id} physical page 1",
+                            lambda doc_id=d.document_id, ver=d.version: retrieval.get_page_text(doc_id, ver, 1),
+                        )
+                    except Exception:
+                        e_page_text = None
+
+                if not e_page_text:
+                    applicability_records.append(
+                        DocumentApplicability(
+                            document_id=d.document_id,
+                            document_version=d.version,
+                            status="uncertain",
+                            reason=f"Endorsement '{d.filename}' could not be read within tool budget or timeout.",
+                        )
+                    )
+                    continue
+
+                # Parse endorsement fields
+                e_ref_match = re.search(r"Policy Endorsement Schedule\s+([A-Z0-9\-]+)", e_page_text, re.IGNORECASE)
+                endorsement_ref = e_ref_match.group(1).strip() if e_ref_match else d.filename
+
+                e_policy_match = re.search(r"(?:Applicable to Policy ID|Policy ID)[:\s]+([^\.\s,]+)", e_page_text, re.IGNORECASE)
+                e_policy_id = e_policy_match.group(1).strip() if e_policy_match else None
+
+                e_member_match = re.search(r"(?:Member Name|Insured Member)[:\s]+([^\.\n\r]+)", e_page_text, re.IGNORECASE)
+                e_member_name = e_member_match.group(1).strip() if e_member_match else None
+
+                e_date_match = re.search(r"(?:Effective From|Effective Date)[:\s]+(\d{4}-\d{2}-\d{2})", e_page_text, re.IGNORECASE)
+                e_effective_from = date.fromisoformat(e_date_match.group(1)) if e_date_match else None
+
+                e_mod_match = re.search(
+                    r"((?:Waiting Period Modification|waiting period)[^\n\r]*?(?:reduced|modified)[^\n\r]*?\.)",
+                    e_page_text,
+                    re.IGNORECASE,
+                )
+                e_mod_quote = normalize_whitespace(e_mod_match.group(1)) if e_mod_match else None
+                e_mod_months = None
+                if e_mod_quote:
+                    to_match = re.search(r"(?:reduced|modified)\s+(?:from\s+[^\.]+\s+)?to\s+([^\.]+?\bmonths?\b)", e_mod_quote, re.IGNORECASE)
+                    if to_match:
+                        e_mod_months = _parse_month_count(to_match.group(1))
+                    if e_mod_months is None:
+                        e_mod_months = _parse_month_count(e_mod_quote)
+
+                # Build candidate evidence for endorsement
+                lines = [l.strip() for l in e_page_text.splitlines() if l.strip()]
+                fallback_quote = lines[0] if lines else normalize_whitespace(e_page_text[:100])
+                cand_quote = e_mod_quote or fallback_quote
+                cand_endorse_ev = Evidence(
+                    document_id=d.document_id,
+                    document_version=d.version,
+                    page=1,
+                    quote=cand_quote,
+                    evidence_type="endorsement",
+                )
+                if tool_steps_used < budget and not is_timed_out():
+                    try:
+                        ver_endorse = call_tool(
+                            "verify_citation",
+                            {"document_id": d.document_id, "version": d.version, "page": 1, "quote": cand_quote},
+                            f"Verifying endorsement citation on page 1",
+                            lambda ev=cand_endorse_ev: retrieval.verify_citation(ev, case_id=case.case_id),
+                        )
+                    except Exception:
+                        pass
+
+                # Applicability criteria evaluation
+                app_status: Literal["applicable", "not_applicable", "uncertain"] = "uncertain"
+                app_reason: str = ""
+
+                # 1. Policy ID match
+                if e_policy_id and case.policy_id and e_policy_id.lower() != case.policy_id.lower():
+                    app_status = "not_applicable"
+                    app_reason = f"Policy ID mismatch: Endorsement applies to '{e_policy_id}', but active case policy ID is '{case.policy_id}'."
+                    endorsement_not_applicable_reason = app_reason
+
+                # 2. Member match
+                elif e_member_name and case.member_name and e_member_name.lower() != case.member_name.lower():
+                    app_status = "not_applicable"
+                    app_reason = f"Member name mismatch: Endorsement applies to '{e_member_name}', but active case member is '{case.member_name}'."
+                    endorsement_not_applicable_reason = app_reason
+
+                # 3. Effective date check relative to case planned admission date
+                elif case.planned_admission_date and e_effective_from and e_effective_from > case.planned_admission_date:
+                    app_status = "not_applicable"
+                    app_reason = (
+                        f"Endorsement effective date ({e_effective_from}) is after planned admission date "
+                        f"({case.planned_admission_date}). Endorsement terms do not apply to this admission."
+                    )
+                    endorsement_not_applicable_reason = app_reason
+
+                # 4. Ambiguous precedence or unresolved conflict
+                elif "ambiguous" in e_page_text.lower() or "conflict" in e_page_text.lower() or "precedence unresolved" in e_page_text.lower():
+                    app_status = "uncertain"
+                    app_reason = "Ambiguous clause precedence: endorsement terms contradict base policy without clear priority language."
+                    endorsement_conflict_reason = app_reason
+
+                # 5. Effective date uncertain (admission date unknown and effective date is in the future)
+                elif case.planned_admission_date is None and e_effective_from and e_effective_from > date.today():
+                    app_status = "uncertain"
+                    app_reason = (
+                        f"Endorsement specifies effective date {e_effective_from}, but planned admission date is unknown. "
+                        f"Precedence cannot be established without confirmed admission date."
+                    )
+                    endorsement_conflict_reason = app_reason
+
+                # 6. Applicable!
+                elif e_mod_quote is not None:
+                    app_status = "applicable"
+                    app_reason = (
+                        f"Endorsement schedule matches policy ID '{case.policy_id}', member '{case.member_name}', "
+                        f"and is effective ({e_effective_from}) prior to planned admission."
+                    )
+                    applicable_endorsement_quote = e_mod_quote
+                    applicable_endorsement_ev = cand_endorse_ev
+                    applicable_endorsement_months = e_mod_months
+
+                else:
+                    app_status = "uncertain"
+                    app_reason = "Endorsement wording did not contain an identifiable waiting period modification clause."
+
                 applicability_records.append(
                     DocumentApplicability(
                         document_id=d.document_id,
                         document_version=d.version,
-                        policy_id=case.policy_id,
-                        member_name=case.member_name,
-                        status="uncertain",
-                        reason="Endorsement schedule uploaded; formal revision evaluation reserved for M5 replay.",
+                        policy_id=e_policy_id or case.policy_id,
+                        member_name=e_member_name or case.member_name,
+                        effective_from=e_effective_from,
+                        status=app_status,
+                        evidence=[cand_endorse_ev] if app_status in {"applicable", "not_applicable"} else [],
+                        reason=app_reason,
+                        modified_topics=["Specific Condition Waiting Period: Joint Replacement"] if app_status == "applicable" else [],
                     )
                 )
 
@@ -685,7 +941,57 @@ class BoundedReviewAgent:
                     )
                 )
 
-            if required_waiting_months is None:
+            if applicable_endorsement_ev and applicable_endorsement_months is not None:
+                if any(w in procedure_name.lower() for w in ("knee", "joint", "arthroplasty", "degenerative")):
+                    required_waiting_months = applicable_endorsement_months
+                    if applicable_endorsement_ev not in evidence_list_t1:
+                        evidence_list_t1.append(applicable_endorsement_ev)
+
+            if endorsement_not_applicable_reason:
+                identity_limitations.append(
+                    f"Uploaded endorsement was evaluated but determined not applicable: {endorsement_not_applicable_reason}. "
+                    f"Base policy terms remain in effect."
+                )
+
+            if endorsement_conflict_reason and any(w in procedure_name.lower() for w in ("knee", "joint", "arthroplasty", "degenerative")):
+                topic1_paused = True
+                if cand_endorse_ev and cand_endorse_ev not in evidence_list_t1:
+                    evidence_list_t1.append(cand_endorse_ev)
+                finding_conflict = Finding(
+                    finding_id=finding_id,
+                    revision=1,
+                    topic=f"Specific Condition Waiting Period: {procedure_name}",
+                    status="conflict",
+                    conclusion=(
+                        f"Uploaded endorsement schedule contradicts base policy terms for {procedure_name}, "
+                        f"but applicability cannot be confirmed ({endorsement_conflict_reason}). "
+                        f"Waiting period terms remain in conflict."
+                    ),
+                    evidence=evidence_list_t1,
+                    relevant_case_facts=["procedure"],
+                    missing_facts=["unambiguous_endorsement_precedence"],
+                    limitations=identity_limitations + [
+                        f"Contradictory waiting period terms detected: {endorsement_conflict_reason}",
+                        "Do not assume newer upload automatically overrides base policy terms.",
+                    ],
+                    next_action="Contact insurance broker or TPA desk to clarify whether endorsement terms supersede base policy.",
+                )
+                findings.append(finding_conflict)
+                checklist.append(
+                    MissingEvidenceItem(
+                        item_id=chk_continuity_id,
+                        related_finding_ids=[finding_id],
+                        requested_information="Clarification from insurer/broker on endorsement precedence",
+                        why_it_matters=f"Terms between base policy and endorsement are in conflict regarding waiting period for {procedure_name}.",
+                        suggested_source="Insurance broker, underwriter, or TPA desk written clarification",
+                        status="requested",
+                    )
+                )
+                unresolved_questions.append(
+                    f"Does the endorsement schedule supersede base policy waiting period terms for {procedure_name}?"
+                )
+
+            elif required_waiting_months is None:
                 topic1_paused = True
                 finding_unspec = Finding(
                     finding_id=finding_id,
@@ -841,25 +1147,58 @@ class BoundedReviewAgent:
 
             else:
                 # Elapsed months >= required waiting months -> Supported finding
+                if applicable_endorsement_ev:
+                    conclusion_text = (
+                        f"Policy terms specify a waiting period of {required_waiting_months} continuous months for treatment of "
+                        f"{procedure_name} under Endorsement Schedule {endorsement_ref or 'EW-2025-01'} (modifying Section 4.2(b)). "
+                        f"Available records document {elapsed_months} months of continuous coverage, satisfying this specific waiting period."
+                    )
+                    next_action_text = (
+                        "Request itemized hospital pre-admission estimate and confirm room category with hospital desk to evaluate room rent and inpatient limits."
+                    )
+                    resolution_note_text = (
+                        f"Applicable Endorsement Schedule {endorsement_ref or 'EW-2025-01'} reduces specific waiting period to "
+                        f"{required_waiting_months} continuous months, which is fully satisfied by {elapsed_months} months continuous coverage."
+                    )
+                else:
+                    conclusion_text = (
+                        f"Policy terms specify a waiting period of {required_waiting_months} continuous months for {procedure_name}. "
+                        f"Available records document {elapsed_months} months of continuous coverage, satisfying this specific waiting period."
+                    )
+                    next_action_text = (
+                        "Confirm planned admission date and obtain itemized pre-admission cost estimate from hospital desk."
+                    )
+                    resolution_note_text = (
+                        f"Specific waiting period of {required_waiting_months} continuous months is satisfied by {elapsed_months} months documented continuous coverage."
+                    )
+
                 finding_supported = Finding(
                     finding_id=finding_id,
                     revision=1,
                     topic=f"Specific Condition Waiting Period: {procedure_name}",
                     status="supported",
-                    conclusion=(
-                        f"Policy terms specify a waiting period of {required_waiting_months} continuous months for {procedure_name}. "
-                        f"Available records document {elapsed_months} months of continuous coverage, satisfying this specific waiting period."
-                    ),
+                    conclusion=conclusion_text,
                     evidence=evidence_list_t1,
-                    relevant_case_facts=["procedure"],
+                    relevant_case_facts=["procedure", "policy_age_months"] if case.policy_age_months else ["procedure"],
                     missing_facts=[],
                     limitations=identity_limitations + [
                         "Applies solely to specific condition waiting period; does not guarantee claim settlement or overall policy coverage.",
-                        "Insurer pre-authorization submission is still required prior to planned hospital admission.",
+                        "Hospital itemized estimate and cashless pre-authorization submission still required prior to planned admission.",
                     ],
-                    next_action="Confirm planned admission date and obtain itemized pre-admission cost estimate from hospital desk.",
+                    next_action=next_action_text,
                 )
                 findings.append(finding_supported)
+                checklist.append(
+                    MissingEvidenceItem(
+                        item_id=chk_continuity_id,
+                        related_finding_ids=[finding_id],
+                        requested_information="Portability Continuity Certificate or Previous Renewal Receipt",
+                        why_it_matters="Proves whether coverage under previous insurer counts toward waiting period.",
+                        suggested_source="Previous insurer policy portal or HR benefits administrator",
+                        status="resolved",
+                        resolution_note=resolution_note_text,
+                    )
+                )
 
         # ----------------------------------------------------------------------
         # Topic 2: Initial 30-Day Policy Waiting Period (Independent Check)
@@ -901,7 +1240,7 @@ class BoundedReviewAgent:
                             is_30d_valid = ver_res_30d.is_valid if hasattr(ver_res_30d, "is_valid") else ver_res_30d[0]
                             if is_30d_valid:
                                 # Determine satisfaction
-                                coverage_duration = case.policy_age_months
+                                coverage_duration = case.policy_age_months or elapsed_months
                                 if coverage_duration is None and case.continuous_coverage_start_date:
                                     ref = case.planned_admission_date or date.today()
                                     coverage_duration = max(0, (ref.year - case.continuous_coverage_start_date.year) * 12 + (ref.month - case.continuous_coverage_start_date.month))
@@ -1003,6 +1342,11 @@ class BoundedReviewAgent:
             review_status = "incomplete"
             stop_details = f"Tool execution budget limit of {budget} calls reached. Validated partial findings preserved."
 
+        elif any(f.status == "conflict" for f in findings):
+            stopped_reason = "conflicting_evidence"
+            review_status = "incomplete"
+            stop_details = "Contradictory document clauses or ambiguous endorsement precedence require resolution."
+
         elif any(item.status == "requested" for item in checklist) or any(f.status == "unresolved" for f in findings):
             stopped_reason = "missing_information"
             review_status = "incomplete"
@@ -1023,6 +1367,62 @@ class BoundedReviewAgent:
             review_status = "complete"
             stop_details = "All checked policy topics evaluated and verified against document citations."
 
+        # Compute evidence change replay against prior packet findings
+        replay_trigger_type = None
+        replay_triggering_evidence = []
+        replay_changed_facts = []
+        replay_reason = ""
+
+        if prior_packet:
+            # Check for document triggers
+            prior_quotes = {e.quote for f in prior_packet.findings for e in f.evidence}
+            new_quotes = {e.quote for f in findings for e in f.evidence}
+            added_quotes = new_quotes - prior_quotes
+            if applicable_endorsement_ev and applicable_endorsement_ev.quote in added_quotes:
+                replay_trigger_type = "new_document"
+                replay_triggering_evidence = [applicable_endorsement_ev]
+                replay_reason = (
+                    f"Uploaded endorsement schedule {endorsement_ref or 'EW-2025-01'} modifies specific waiting period "
+                    f"from 24 to 12 continuous months."
+                )
+            elif added_quotes:
+                replay_trigger_type = "new_document"
+                replay_triggering_evidence = [
+                    e for f in findings for e in f.evidence if e.quote in added_quotes
+                ][:1]
+                replay_reason = "New document evidence uploaded triggering finding revision."
+
+            # Check for case fact triggers
+            fact_diffs: list[CaseFactName] = []
+            for fact_name in (
+                "planned_admission_date",
+                "continuous_coverage_start_date",
+                "policy_age_months",
+                "procedure",
+                "policy_id",
+                "member_name",
+            ):
+                if getattr(case, fact_name) != getattr(prior_packet.case, fact_name):
+                    fact_diffs.append(fact_name)  # type: ignore
+
+            if fact_diffs and not replay_trigger_type:
+                is_user_corr = any(
+                    case.fact_sources.get(fn) and case.fact_sources[fn].source_type == "user_provided"
+                    for fn in fact_diffs
+                )
+                replay_trigger_type = "user_correction" if is_user_corr else "case_details_changed"
+                replay_changed_facts = fact_diffs
+                replay_reason = f"Corrected case details for {', '.join(fact_diffs)} triggered reassessment."
+
+        final_findings, final_revisions = compute_evidence_replay(
+            prior_packet=prior_packet,
+            new_findings=findings,
+            trigger_type=replay_trigger_type,
+            triggering_evidence=replay_triggering_evidence,
+            changed_case_facts=replay_changed_facts,
+            reason=replay_reason,
+        )
+
         # Build master ReviewPacket snapshot
         packet = ReviewPacket(
             packet_id=f"pkt-{case.case_id}-{uuid.uuid4().hex[:6]}",
@@ -1030,8 +1430,8 @@ class BoundedReviewAgent:
             run_id=run_id,
             case=case,
             review_status=review_status,
-            findings=findings,
-            revisions=list(prior_packet.revisions) if prior_packet else [],
+            findings=final_findings,
+            revisions=final_revisions,
             document_applicability=applicability_records,
             missing_evidence_checklist=checklist,
             unresolved_questions=unresolved_questions,

@@ -302,7 +302,40 @@ class HospitalRecordReference(BaseModel):
     )
 ```
 
-### 3.5 Evidence Change Replay Computation (AGREED)
+### 3.5 Evidence Change Replay Contract & Interfaces (AGREED - M5)
+
+The Evidence Change Replay engine computes traceable revisions across document iterations and case-fact corrections:
+
+#### 1. Input Case / Evidence Snapshot & Current Findings
+- **Case & Provenance**: `CaseDetails` snapshot including all user-provided and document-derived facts with their `FactSource`.
+- **Active Documents**: Case-scoped extracted documents and pages from `EvidenceRetrievalService`.
+- **Prior State**: `prior_packet: ReviewPacket | None`. Contains the previous baseline `findings`, `revisions` history, and `missing_evidence_checklist`.
+- **Follow-up Inputs**: `user_answers: dict[str, Any] | None` containing caregiver responses or corrected case facts.
+
+#### 2. Stable Finding IDs & Revision Numbers
+- Every finding maintains a permanent, unique `finding_id` per topic per case (e.g. `find-waiting-period-specific-condition-total-knee-replacement`, `find-waiting-period-initial-30-day`, `find-room-rent-inpatient-limits`).
+- Findings start at `revision = 1`.
+- When a finding experiences a substantive change in status, conclusion, evidence, or next action:
+  - Its `revision` number increments by exactly 1 (`new_finding_revision = old_finding_revision + 1`).
+  - An atomic `Revision` log entry is recorded linking the prior state to the revised state.
+- Unchanged findings preserve their exact existing `revision` number, status, conclusion, citations, and finding ID.
+- Avoid duplicate revisions: cosmetic re-runs, model paraphrasing, or identical duplicate uploads must NOT increment the revision number.
+
+#### 3. Changed, Unchanged, and New Findings
+- `ReviewPacket.findings` strictly contains the current (latest) revision of each active finding. Superseded older revisions are moved to `ReviewPacket.revisions`.
+- Newly introduced conditions, endorsements, or policy conflicts create a new `Finding` with `revision = 1`.
+- Unrelated findings (e.g. initial 30-day waiting period, room rent limits) remain intact and untouched when an endorsement only modifies specific joint replacements.
+
+#### 4. Document and Case-Fact Triggers
+- `trigger_type: Literal["new_document", "user_correction", "case_details_changed"]`
+  - `"new_document"`: Triggered by upload or version update of an endorsement, schedule, or hospital bill. Requires `triggering_evidence: list[Evidence]` citing the physical page and quote.
+  - `"user_correction"`: Triggered by user follow-up answer or caregiver input correction. Requires `changed_case_facts: list[CaseFactName]`.
+  - `"case_details_changed"`: Triggered by case date or procedure modification. Requires `changed_case_facts: list[CaseFactName]`.
+
+#### 5. Persistence Responsibility & Stale-Result Handling
+- **Persistence Boundary**: Review engine (`BoundedReviewAgent` / `compute_evidence_replay`) is side-effect free. It returns a validated `ReviewPacket` without writing directly to SQLite or filesystem. Owner A's `ReviewService` and `ReviewRepository` handle transactional persistence in SQLite (`review_packets`, `findings`, `revisions`, `checklist_items`).
+- **Stale-Result & Early Stopping Handling**: If a reassessment run stops early (e.g., `tool_limit_reached` or `timeout`), findings that could not be reassessed retain explicit limitations and an honest `review_status="incomplete"` with `stopped_reason`. The agent never falsely reports completion or implies that all findings are up to date when the tool budget or timeout halted execution.
+
 ```python
 def compute_evidence_replay(
     prior_packet: ReviewPacket | None,
@@ -315,10 +348,10 @@ def compute_evidence_replay(
     """
     Computes delta between prior_packet findings and new findings:
     1. Distinguishes three finding categories:
-       - Changed findings: status or conclusion differs from prior finding.
+       - Changed findings: status, conclusion, evidence, or next action differs from prior finding.
          Finding.revision increments by exactly 1 (old_finding.revision + 1).
          A Revision record is emitted linking old to new revision.
-       - Unchanged findings: status and conclusion match prior finding.
+       - Unchanged findings: status, conclusion, evidence, and next action match prior finding.
          Finding.revision remains at old_finding.revision.
          Zero new Revision records are emitted for unchanged findings.
        - New findings: finding_id did not exist in prior_packet.
