@@ -1,7 +1,7 @@
-Updated: 2026-10-24T15:45:00+05:30
-Owner / task: OWNER B / M6-B & review-data side of M6-I (Synthetic Hospital Lookup, Desk Questions & Export Data Packaging)
-Branch / implementation commit or PR: feat/m6-hospital-and-questions
-Delivery state: implemented and verified on branch feat/m6-hospital-and-questions (14/14 M6 unit tests, 12/12 verify_m6 checks, 121/121 full pytest suite passing)
+Updated: 2026-10-24T15:55:00+05:30
+Owner / task: OWNER B / M6-B & M6-I (Review Engine & Data Packaging Integration)
+Branch / implementation commit or PR: main (integrated from feat/m6-hospital-and-questions)
+Delivery state: integrated and verified on main (all 128 pytest tests, 21 verify_m6 checks, and all milestone verification suites passing)
 
 Implemented:
 
@@ -204,10 +204,10 @@ Verification Results:
   - 11. Deterministic export payload generation from saved snapshot
   - 12. Incomplete and timeout review states preserved in export
 - Full repository regression:
-  - `pytest`: 121/121 tests passed in 13.41s across all test suites.
-  - Acceptance suites: `verify_m1.py` (5/5), `verify_m2.py` (8/8), `verify_m3.py` (8/8), `verify_m4.py` (15/15), `verify_m5.py` (16/16), `verify_m6.py` (12/12).
+  - `pytest`: 128/128 tests passed in 13.62s across all test suites.
+  - Acceptance suites: `verify_m1.py` (5/5), `verify_m2.py` (8/8), `verify_m3.py` (8/8), `verify_m4.py` (15/15), `verify_m5.py` (16/16), `verify_m6.py` (21/21).
 
 Limitations & Delivery State:
-- Data packaging and review integration complete on `feat/m6-hospital-and-questions`.
-- Review export consumes static snapshots without model invocation; HTML rendering and download button reside with Owner A's M6-A implementation.
+- Milestone M6-B and M6-I completely implemented, integrated with Owner A's M6-A HTML exporter, and verified on main.
+- Review export consumes static snapshots without model invocation; HTML rendering and download button verified in UI and tests.
 - Milestone M7 has NOT been started.
