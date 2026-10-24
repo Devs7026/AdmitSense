@@ -1,7 +1,7 @@
 Updated: 2026-10-24T16:32:00+05:30
 Owner / task: OWNER A / M7-A & M7-I (End-to-End User Journey Verification, Documentation, and Demonstration Runbook)
-Branch / implementation commit or PR: feat/m7-end-to-end-verification
-Delivery state: local / ready for merge
+Branch / implementation commit or PR: main (feat/m7-end-to-end-verification)
+Delivery state: merged
 Implemented:
 1. Complete 10-Step Caregiver User Journey Verification (`tests/test_m7_journey.py` & `tests/verify_m7.py`):
    - Step 1: Case creation with partial/available facts (preserving None for unknowns, provenance=user_provided).
