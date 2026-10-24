@@ -1,5 +1,5 @@
-@"
 .venv/
+venv/
 .env
 __pycache__/
 *.pyc
@@ -7,4 +7,5 @@ __pycache__/
 .streamlit/secrets.toml
 exports/*
 !exports/.gitkeep
-"@ | Set-Content .gitignore
+data/
+*.db

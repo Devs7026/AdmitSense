@@ -1,0 +1,145 @@
+{
+  "packet_id": "pkt-sample-001",
+  "packet_version": 1,
+  "run_id": "run-sample-001",
+  "generated_at": "2026-10-24T10:00:00Z",
+  "case": {
+    "case_id": "case-sample-001",
+    "member_name": "Ramesh Sharma",
+    "policy_id": "POL-998877",
+    "policy_start_date": "2024-04-01",
+    "continuous_coverage_start_date": "2024-04-01",
+    "planned_admission_date": "2026-11-15",
+    "policy_age_months": 18,
+    "procedure": "Total Knee Replacement",
+    "hospital_name": "Apex Super Specialty Hospital",
+    "estimated_cost": "250000.00",
+    "currency": "INR",
+    "fact_sources": {
+      "member_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_id": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_start_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "continuous_coverage_start_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "planned_admission_date": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "policy_age_months": {
+        "source_type": "derived",
+        "evidence": [],
+        "explanation": "Calculated from coverage start date to planned admission date."
+      },
+      "procedure": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "hospital_name": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      },
+      "estimated_cost": {
+        "source_type": "user_provided",
+        "evidence": [],
+        "explanation": null
+      }
+    }
+  },
+  "review_status": "incomplete",
+  "findings": [
+    {
+      "finding_id": "find-waiting-period-001",
+      "revision": 1,
+      "topic": "Waiting Period (Joint Replacement)",
+      "status": "unresolved",
+      "conclusion": "Standard policy terms stipulate a 24-month waiting period for joint replacement surgeries. Supplied continuous coverage history is 18 months, leaving a potential 6-month gap unless an endorsement or continuous portability certificate applies.",
+      "evidence": [
+        {
+          "document_id": "doc-policy-wording-2024",
+          "document_version": "v1",
+          "page": 14,
+          "quote": "Section 4.2(b): Treatment for degenerative joint disorders including total knee replacement is covered subject to a specific waiting period of twenty-four (24) continuous months from the initial policy inception date.",
+          "evidence_type": "policy_wording"
+        }
+      ],
+      "relevant_case_facts": [
+        "policy_start_date",
+        "planned_admission_date",
+        "procedure"
+      ],
+      "missing_facts": [
+        "Prior continuous insurance continuity certificates"
+      ],
+      "limitations": [
+        "Endorsement schedule not yet provided to determine if corporate waiver applies."
+      ],
+      "next_action": "Request prior policy continuity certificate or endorsement schedule from insurer/broker to clarify if waiting period was waived.",
+      "created_at": "2026-10-24T10:00:00Z"
+    }
+  ],
+  "revisions": [],
+  "document_applicability": [
+    {
+      "document_id": "doc-policy-wording-2024",
+      "document_version": "v1",
+      "policy_id": "POL-998877",
+      "member_name": "Ramesh Sharma",
+      "issued_on": "2024-03-15",
+      "effective_from": "2024-04-01",
+      "effective_to": "2025-03-31",
+      "modified_topics": [
+        "Waiting Period (Joint Replacement)"
+      ],
+      "status": "applicable",
+      "evidence": [
+        {
+          "document_id": "doc-policy-wording-2024",
+          "document_version": "v1",
+          "page": 1,
+          "quote": "Policy Master Document for Care Health Gold Series.",
+          "evidence_type": "policy_wording"
+        }
+      ],
+      "reason": "Base policy document matches policy ID family."
+    }
+  ],
+  "missing_evidence_checklist": [
+    {
+      "item_id": "chk-continuity-cert",
+      "related_finding_ids": [
+        "find-waiting-period-001"
+      ],
+      "requested_information": "Portability Continuity Certificate or Previous Policy Renewal Receipt",
+      "why_it_matters": "Proves whether coverage under prior insurer counts toward the 24-month joint replacement waiting period.",
+      "suggested_source": "Previous insurer policy documents or HR benefits portal",
+      "status": "requested",
+      "resolution_note": null
+    }
+  ],
+  "unresolved_questions": [
+    "Does member have an endorsement waiver reducing joint replacement waiting period from 24 to 12 months?"
+  ],
+  "authorization_status": "not verified",
+  "authorization_evidence": [],
+  "tool_steps_used": 3,
+  "stopped_reason": "missing_information",
+  "stop_details": "Awaiting prior coverage continuity certificate"
+}
