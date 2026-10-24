@@ -1,7 +1,7 @@
 Updated: 2026-10-24T12:55:00+05:30
 Owner / task: OWNER A / M4-A & Interface side of M4-I (User Follow-up, Activity Display, and Run Status)
-Branch / implementation commit or PR: feat/m4-user-followup-and-activity
-Delivery state: ready for review (awaiting teammate review and merge authorisation)
+Branch / implementation commit or PR: main (merge commit f65c593)
+Delivery state: integrated
 Implemented:
 1. Concise Tool Activity Event Stream:
    - Added table `tool_activity_events` in SQLite schema (`src/admitsense/storage/database.py`) with indexes `idx_activity_run` and `idx_activity_case`.
