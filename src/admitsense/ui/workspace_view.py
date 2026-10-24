@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from datetime import date
+from decimal import Decimal
+
 import streamlit as st
 from admitsense.documents.models import DocumentRecord, ExtractedPage
 from admitsense.documents.retrieval import SqliteEvidenceRetrieval
@@ -15,7 +18,7 @@ from admitsense.documents.synthetic import (
     build_synthetic_unreadable_pdf,
 )
 from admitsense.review.service import ReviewService
-from admitsense.schemas import CaseDetails, Evidence, ReviewPacket
+from admitsense.schemas import CaseDetails, Evidence, FactSource, ReviewPacket
 from admitsense.storage.case_repository import CaseRepository
 from admitsense.storage.review_repository import ReviewRepository
 from admitsense.ui.components import render_authorization_badge
@@ -69,6 +72,9 @@ def render_workspace_view(
         case_repo=repo, review_repo=r_repo, retrieval=ev_retrieval
     )
 
+    # Fetch latest persisted ReviewPacket from SQLite for this case
+    persisted_packet = r_repo.get_latest_review_packet(case.case_id)
+
     # Top Navigation Row
     top_c1, top_c2, top_c3, top_c4 = st.columns([2, 4, 2, 2])
     with top_c1:
@@ -86,25 +92,40 @@ def render_workspace_view(
             st.session_state.current_view = "setup"
             st.rerun()
     with top_c4:
-        # Review available documents action trigger
+        action_label = "🔄 Resume Review (New Run)" if persisted_packet else "🔍 Review Available Documents"
+        action_help = (
+            "Trigger an explicit new review run linked to this case, retaining previous run history"
+            if persisted_packet
+            else "Trigger automated policy review on ingested documents and case facts"
+        )
         if st.button(
-            "🔍 Review Available Documents",
+            action_label,
             type="primary",
             use_container_width=True,
-            help="Trigger automated policy review on ingested documents and case facts",
+            help=action_help,
+            key="btn_trigger_review_top",
         ):
-            with st.spinner("Analyzing case facts and policy documents..."):
+            with st.status("Analyzing case facts and policy documents...", expanded=True) as status_box:
+                def on_tool_activity(evt):
+                    step = getattr(evt, "step_number", "?")
+                    tool_name = getattr(evt, "tool_name", "tool")
+                    summary = getattr(evt, "summary", str(evt))
+                    status = getattr(evt, "status", "invoked")
+                    status_box.write(f"Step {step}/8: `{tool_name}` — {summary} ({status})")
+
                 try:
-                    packet = r_service.execute_review(case.case_id)
+                    packet = r_service.execute_review(case.case_id, event_callback=on_tool_activity)
+                    status_box.update(
+                        label=f"Review Finished: {packet.review_status.upper()}",
+                        state="complete",
+                    )
                     st.toast(f"Review completed: {packet.review_status.upper()}", icon="✅")
                     st.rerun()
                 except Exception as e:
+                    status_box.update(label="Review encountered an issue", state="error")
                     st.error(f"Review execution failed: {e}")
 
     st.markdown("---")
-
-    # Fetch latest persisted ReviewPacket from SQLite for this case
-    persisted_packet = r_repo.get_latest_review_packet(case.case_id)
 
     # Authorisation Status Banner (Non-negotiable invariant: strictly separate, defaults to unverified)
     auth_status = persisted_packet.authorization_status if persisted_packet else "not verified"
@@ -199,11 +220,11 @@ def render_workspace_view(
     # 2. Findings & Review
     with tab_review:
         if persisted_packet:
-            # Render persisted review packet from SQLite
+            # 1. Packet Run Status & Safety Gauge
             status_color = "#16a34a" if persisted_packet.review_status == "complete" else "#ea580c"
             st.markdown(
                 f"""
-                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 0.75rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: 700; font-size: 1.1rem; color: #1e293b;">
                             Persisted Review Packet: <code>{persisted_packet.packet_id}</code> (v{persisted_packet.packet_version})
@@ -222,9 +243,59 @@ def render_workspace_view(
                 unsafe_allow_html=True,
             )
 
-            if persisted_packet.stop_details:
+            # Honest Stop Reason Reporting
+            if persisted_packet.stopped_reason == "tool_limit_reached":
+                st.warning(
+                    f"⚠️ **Tool Limit Reached ({persisted_packet.tool_steps_used}/8 calls)**: "
+                    "The agent halted after exhausting its execution budget. Showing validated partial findings below."
+                )
+            elif persisted_packet.stopped_reason == "missing_information":
+                st.info(
+                    "ℹ️ **Missing Information**: Required document evidence or case facts are missing. "
+                    "You can answer follow-up questions below or upload missing documents."
+                )
+            elif persisted_packet.stopped_reason == "processing_error":
+                st.error(f"❌ **Processing Error**: {persisted_packet.stop_details}")
+            elif persisted_packet.stop_details:
                 st.caption(f"ℹ️ {persisted_packet.stop_details}")
 
+            # 2. Activity Event Stream Display (Concise real tool calls from SQLite)
+            activity_events = r_repo.list_activity_events(run_id=persisted_packet.run_id)
+            if not activity_events:
+                activity_events = r_repo.list_activity_events(case_id=case.case_id)
+
+            with st.expander(f"⚡ Agent Tool Activity Log ({len(activity_events)} actual steps)", expanded=False):
+                if activity_events:
+                    for evt in activity_events:
+                        st_badge = {
+                            "completed": ("#16a34a", "COMPLETED"),
+                            "failed": ("#dc2626", "FAILED"),
+                            "invoked": ("#2563eb", "INVOKED"),
+                        }.get(evt.get("status"), ("#64748b", evt.get("status", "").upper()))
+                        tool_nm = evt.get("tool_name", "")
+                        step_num = evt.get("step_number", "?")
+                        summary_txt = evt.get("summary", "")
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.45rem 0.75rem; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <span style="font-weight: 700; font-size: 0.82rem; color: #334155;">Step {step_num}/8</span> &nbsp;
+                                    <code style="font-size: 0.85rem; color: #0f172a;">{tool_nm}</code> &nbsp;
+                                    <span style="color: #475569; font-size: 0.88rem;">{summary_txt}</span>
+                                </div>
+                                <span style="background-color: {st_badge[0]}; color: white; padding: 0.15rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                    {st_badge[1]}
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        if evt.get("error"):
+                            st.caption(f"⚠️ Error: {evt['error']}")
+                else:
+                    st.caption("No real tool events recorded yet for this run.")
+
+            # 3. Findings
             st.markdown("### Findings")
             for finding in persisted_packet.findings:
                 status_badge = {
@@ -276,25 +347,218 @@ def render_workspace_view(
                         st.markdown(f"**Limitations:** {', '.join(finding.limitations)}")
                     st.markdown(f"**Next Action:** {finding.next_action}")
 
-            # Missing-Evidence Checklist
+            # 4. Missing-Evidence Checklist with "I Don't Have This"
             if persisted_packet.missing_evidence_checklist:
                 st.markdown("### Missing-Evidence Checklist")
-                for item in persisted_packet.missing_evidence_checklist:
-                    st.markdown(
-                        f"""
-                        <div class="fact-card">
-                            <strong>Requested:</strong> {item.requested_information}<br>
-                            <span style="font-size: 0.9rem; color: #475569;"><strong>Why it matters:</strong> {item.why_it_matters}</span><br>
-                            <span style="font-size: 0.85rem; color: #64748b;"><strong>Suggested Source:</strong> {item.suggested_source or 'Insurer / TPA'}</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
+                for chk_idx, item in enumerate(persisted_packet.missing_evidence_checklist):
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div class="fact-card" style="margin-bottom: 0.5rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <div>
+                                        <strong>Requested:</strong> {item.requested_information}<br>
+                                        <span style="font-size: 0.9rem; color: #475569;"><strong>Why it matters:</strong> {item.why_it_matters}</span><br>
+                                        <span style="font-size: 0.85rem; color: #64748b;"><strong>Suggested Source:</strong> {item.suggested_source or 'Insurer / TPA'}</span>
+                                    </div>
+                                    <span style="font-size: 0.8rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; background: {'#dcfce7; color: #166534' if item.status == 'provided_pending_review' else '#fef3c7; color: #92400e' if item.status == 'requested' else '#e2e8f0; color: #475569'};">
+                                        {item.status.upper().replace('_', ' ')}
+                                    </span>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        if item.status == "requested":
+                            btn_c1, btn_c2 = st.columns([1, 1])
+                            with btn_c1:
+                                if st.button(
+                                    "⚠️ I Don't Have This",
+                                    key=f"btn_dont_have_{item.item_id}_{chk_idx}",
+                                    help="Declare that you do not have this evidence; topic will remain unresolved without proof",
+                                    use_container_width=True,
+                                ):
+                                    r_repo.update_checklist_item_status(
+                                        case_id=case.case_id,
+                                        item_id=item.item_id,
+                                        status="user_does_not_have",
+                                        resolution_note="Caregiver declared evidence unavailable.",
+                                    )
+                                    st.toast("Item marked as unavailable. Finding will remain unresolved.")
+                                    st.rerun()
+                            with btn_c2:
+                                st.caption("👉 You can upload documents in the Documents tab or answer below.")
+
+                        elif item.status == "user_does_not_have":
+                            st.warning(
+                                "⚠️ **Caregiver declared this evidence unavailable.** "
+                                "Under insurance rules, the relevant policy condition/waiting period remains unresolved without documentation."
+                            )
+                            if st.button("Undo / Provide Now", key=f"btn_undo_dont_have_{item.item_id}_{chk_idx}"):
+                                r_repo.update_checklist_item_status(
+                                    case_id=case.case_id,
+                                    item_id=item.item_id,
+                                    status="requested",
+                                    resolution_note=None,
+                                )
+                                st.rerun()
+
+                        elif item.status == "provided_pending_review":
+                            st.info(f"📋 **Provided (Pending Re-review)**: {item.resolution_note or 'Answer recorded.'}")
+
+                        st.markdown("<hr style='margin: 0.4rem 0;'>", unsafe_allow_html=True)
+
+            # 5. Follow-Up Answering Form (User Answers & Missing Facts Provenance)
+            st.markdown("### User Follow-Up & Missing Facts")
+            with st.expander("✍️ Answer Questions & Provide Missing Case Facts", expanded=True):
+                st.caption(
+                    "All facts provided here are explicitly recorded with `FactSource(source_type='user_provided')` "
+                    "provenance and saved to SQLite."
+                )
+
+                # Show fields that are currently None or can be updated
+                up_form = st.form(key=f"user_followup_form_{persisted_packet.packet_id}")
+
+                col_f1, col_f2 = up_form.columns(2)
+                with col_f1:
+                    new_cont_date = up_form.date_input(
+                        "Continuous Coverage Start Date",
+                        value=case.continuous_coverage_start_date or None,
+                        help="Date when insurance first started (including prior ported policies)",
+                    )
+                    new_policy_date = up_form.date_input(
+                        "Current Policy Inception / Start Date",
+                        value=case.policy_start_date or None,
+                        help="Start date of current policy year",
+                    )
+                    new_policy_age = up_form.number_input(
+                        "Policy Age in Months",
+                        min_value=0,
+                        max_value=360,
+                        value=int(case.policy_age_months) if case.policy_age_months is not None else 0,
+                        help="Continuous months covered",
                     )
 
-            if persisted_packet.unresolved_questions:
-                st.markdown("### Unresolved Questions for Hospital Desk / Insurer")
-                for q in persisted_packet.unresolved_questions:
-                    st.markdown(f"- ❓ {q}")
+                with col_f2:
+                    new_proc = up_form.text_input(
+                        "Procedure Name",
+                        value=case.procedure or "",
+                        help="Planned surgical procedure (e.g. Total Knee Replacement)",
+                    )
+                    new_cost = up_form.number_input(
+                        "Estimated Hospital Cost (INR)",
+                        min_value=0.0,
+                        value=float(case.estimated_cost) if case.estimated_cost is not None else 0.0,
+                        step=1000.0,
+                    )
+                    new_hosp = up_form.text_input(
+                        "Hospital Name",
+                        value=case.hospital_name or "",
+                    )
+
+                # Unresolved Questions
+                free_answers: dict[str, str] = {}
+                if persisted_packet.unresolved_questions:
+                    up_form.markdown("**Answer Clarification Questions:**")
+                    for q_idx, question in enumerate(persisted_packet.unresolved_questions):
+                        free_answers[question] = up_form.text_area(
+                            f"Question: {question}",
+                            key=f"q_ans_{q_idx}",
+                            placeholder="Enter clarification or details here...",
+                        )
+
+                submitted = up_form.form_submit_button("Save Answers & Update Case Facts ➔", type="primary")
+                if submitted:
+                    updated_case = case.model_copy()
+                    fact_sources = dict(updated_case.fact_sources)
+
+                    if new_cont_date:
+                        updated_case.continuous_coverage_start_date = new_cont_date
+                        fact_sources["continuous_coverage_start_date"] = FactSource(source_type="user_provided")
+                    if new_policy_date:
+                        updated_case.policy_start_date = new_policy_date
+                        fact_sources["policy_start_date"] = FactSource(source_type="user_provided")
+                    if new_policy_age > 0:
+                        updated_case.policy_age_months = int(new_policy_age)
+                        fact_sources["policy_age_months"] = FactSource(source_type="user_provided")
+                    if new_proc.strip():
+                        updated_case.procedure = new_proc.strip()
+                        fact_sources["procedure"] = FactSource(source_type="user_provided")
+                    if new_cost > 0.0:
+                        updated_case.estimated_cost = Decimal(str(new_cost))
+                        fact_sources["estimated_cost"] = FactSource(source_type="user_provided")
+                    if new_hosp.strip():
+                        updated_case.hospital_name = new_hosp.strip()
+                        fact_sources["hospital_name"] = FactSource(source_type="user_provided")
+
+                    updated_case.fact_sources = fact_sources
+                    repo.update_case(updated_case)
+
+                    # Update checklist items to provided_pending_review
+                    if persisted_packet.missing_evidence_checklist:
+                        for chk in persisted_packet.missing_evidence_checklist:
+                            if chk.status == "requested":
+                                r_repo.update_checklist_item_status(
+                                    case_id=case.case_id,
+                                    item_id=chk.item_id,
+                                    status="provided_pending_review",
+                                    resolution_note="User supplied follow-up case facts.",
+                                )
+
+                    st.toast("✅ Follow-up information saved with user provenance!", icon="✅")
+                    st.rerun()
+
+            # 6. Explicit Resume Review Action
+            st.markdown("---")
+            res_c1, res_c2 = st.columns([3, 2])
+            with res_c1:
+                st.markdown(
+                    "**Ready to evaluate updated information?**<br>"
+                    "<span style='color: #64748b; font-size: 0.85rem;'>"
+                    "Resuming creates an explicit new run record linked to this case, preserving all prior runs."
+                    "</span>",
+                    unsafe_allow_html=True,
+                )
+            with res_c2:
+                if st.button("🔄 Resume Review (New Run)", type="primary", use_container_width=True, key="btn_resume_review_tab"):
+                    with st.status("Resuming review with updated case facts...", expanded=True) as res_status:
+                        def on_resume_tool_evt(evt):
+                            step = getattr(evt, "step_number", "?")
+                            tool_name = getattr(evt, "tool_name", "tool")
+                            summary = getattr(evt, "summary", str(evt))
+                            res_status.write(f"Step {step}/8: `{tool_name}` — {summary}")
+
+                        try:
+                            new_packet = r_service.execute_review(case.case_id, event_callback=on_resume_tool_evt)
+                            res_status.update(label=f"Review Finished: {new_packet.review_status.upper()}", state="complete")
+                            st.toast(f"New review run completed: {new_packet.review_status.upper()}", icon="✅")
+                            st.rerun()
+                        except Exception as e:
+                            res_status.update(label="Resume failed", state="error")
+                            st.error(f"Review execution failed: {e}")
+
+            # 7. Historical Review Runs
+            historical_packets = r_repo.list_review_packets(case.case_id)
+            if len(historical_packets) > 1:
+                with st.expander(f"📜 Review Run History ({len(historical_packets)} runs recorded)", expanded=False):
+                    for pkt in historical_packets:
+                        is_current = pkt.packet_id == persisted_packet.packet_id
+                        st.markdown(
+                            f"""
+                            <div style="background-color: {'#eff6ff' if is_current else '#f8fafc'}; border: 1px solid {'#93c5fd' if is_current else '#e2e8f0'}; border-radius: 6px; padding: 0.45rem 0.75rem; margin-bottom: 0.35rem; display: flex; justify-content: space-between;">
+                                <div>
+                                    <strong>v{pkt.packet_version}</strong> &bull; <code>{pkt.packet_id}</code> &bull; Run: <code>{pkt.run_id}</code><br>
+                                    <span style="font-size: 0.8rem; color: #64748b;">Tool Steps: {pkt.tool_steps_used}/8 &bull; Stop Reason: {persisted_reason_label(pkt.stopped_reason)}</span>
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="font-weight: 700; font-size: 0.8rem; color: {'#16a34a' if pkt.review_status == 'complete' else '#ea580c'};">{pkt.review_status.upper()}</span><br>
+                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.created_at.strftime('%H:%M:%S') if pkt.created_at else ''}</span>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
         else:
             # No review packet run yet for this case: offer scenario preview or trigger action

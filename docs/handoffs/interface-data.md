@@ -1,44 +1,72 @@
-Updated: 2026-10-24T12:25:00+05:30
-Owner / task: OWNER A / M3-A (Interface side of M3-I prepared)
-Branch / implementation commit or PR: main (merge commit 3c87815)
+Updated: 2026-10-24T12:55:00+05:30
+Owner / task: OWNER A / M4-A & Interface side of M4-I (User Follow-up, Activity Display, and Run Status)
+Branch / implementation commit or PR: main (merge commit f65c593)
 Delivery state: integrated
 Implemented:
-- SQLite persistence layer for review outputs in `src/admitsense/storage/review_repository.py`:
-  - `save_review_packet(packet)`: atomic transaction saving packet metadata, raw serialized JSON snapshot (for future M6 deterministic exports), findings, revisions, and checklist items.
-  - `get_latest_review_packet(case_id)`: reloads the most recent validated `ReviewPacket` snapshot.
-  - `list_review_packets(case_id)`: historical audit list of all generated packets for a case.
-  - `get_finding_history(case_id, finding_id)`: audit trail of revisions for a given topic/finding.
-- SQLite schema additions in `src/admitsense/storage/database.py`:
-  - `review_packets`: packet_id, case_id, packet_version, run_id, review_status, authorization_status, stopped_reason, stop_details, tool_steps_used, packet_json, created_at.
-  - `findings`: finding_id, packet_id, revision, topic, status, conclusion, next_action, limitations, evidence_json.
-  - `revisions`: revision_id, packet_id, finding_id, old_finding_revision, new_finding_revision, old_status, new_status, old_conclusion, new_conclusion, trigger_type, reason, affected_topics, triggering_evidence_json.
-  - `checklist_items`: item_id, packet_id, requested_information, why_it_matters, suggested_source, status, resolution_note.
-- Review service & adapter in `src/admitsense/review/service.py`:
-  - `ReviewService`: loads case facts, coordinates review execution with the runner, and commits snapshot via `ReviewRepository`.
-  - `FixtureReviewRunner`: clearly labelled development fixture behind agreed `ReviewRunnerProtocol`. Evaluates actual case facts against extracted SQLite document text using `SqliteEvidenceRetrieval` or `EvidenceRetrievalService`. Evaluates 24-month waiting period on p14 against 18-month history, generating an unresolved finding, physical page 14 citation, and checklist item. When endorsement schedule is ingested, updates finding to `supported` with citation and records a `Revision` entry.
-- Streamlit Case Workspace in `src/admitsense/ui/workspace_view.py`:
-  - "🔍 Review Available Documents" action trigger button in header with processing spinner.
-  - Persisted Review Packet summary bar: packet ID, version, review status badge, run ID, tool steps used (capped at 8), and stop reason.
-  - Separate Insurer Authorisation banner defaulting to `"not verified"` (strict product invariant).
-  - Findings accordion cards displaying status (`SUPPORTED`, `UNRESOLVED`, `CONFLICT`, `NEEDS HUMAN REVIEW`), conclusion, limitations, next action, and clickable physical page citation buttons.
-  - Citation navigation to Evidence Viewer: clicking a citation sets session state and opens the exact physical page with the quoted text highlighted in `<mark>` yellow.
-  - Missing-evidence checklist showing requested information, why it matters, suggested source, and quick link to document upload tab.
-  - Explicit states for incomplete reviews, processing spinners, and error alerts.
+1. Concise Tool Activity Event Stream:
+   - Added table `tool_activity_events` in SQLite schema (`src/admitsense/storage/database.py`) with indexes `idx_activity_run` and `idx_activity_case`.
+   - Enhanced `ReviewRepository` (`src/admitsense/storage/review_repository.py`) with `save_activity_event()` and `list_activity_events()` to persist real tool telemetry.
+   - Streamed tool events from `ReviewService.execute_review()` automatically save each event (`search_pages`, `read_page`, `verify_citation`, `lookup_hospital`) to SQLite without inventing events or exposing private model reasoning.
+   - Added collapsible "Agent Tool Activity Log" in Streamlit Workspace (`src/admitsense/ui/workspace_view.py`) rendering actual chronological tool calls with step count, tool name, invocation/completed/failed status, arguments, and human-readable action summaries.
+2. Honest Run Status, Stop Reason, and Validated Partial Results:
+   - Configured honest status reporting in workspace: displays whether review is `complete`, `incomplete`, or `error`.
+   - Distinct alert banners for `stopped_reason`:
+     - `missing_information`: highlights what information is missing to make progress.
+     - `tool_limit_reached`: transparently informs user that tool execution reached the bounded budget limit and shows partial results.
+     - `processing_error`: honestly surfaces execution errors with stop details without claiming success.
+   - Preserves validated partial findings and checklist items even when review halts prematurely.
+3. User Answer Inputs with FactSource Provenance:
+   - Interactive follow-up input form in workspace allowing user to answer questions or provide missing case facts:
+     - Continuous coverage inception date
+     - Policy start date
+     - Elapsed policy age (months)
+     - Medical procedure name
+     - Estimated hospitalization cost
+   - Updates `CaseDetails` in SQLite and attaches provenance via `FactSource(source_type="user_provided")` for every field supplied.
+   - Automatically marks corresponding checklist items as `"provided_pending_review"`.
+4. "I Don't Have This" Handling:
+   - Checklist items feature an explicit "⚠️ I Don't Have This" action button.
+   - Marks item status as `"user_does_not_have"` with an explanatory resolution note recorded in SQLite and the serialized ReviewPacket.
+   - Survives page refresh and application restart.
+   - Invariant preserved: marking "I don't have this" retains the relevant question and finding as unresolved; it never infers coverage or synthesizes waivers.
+   - Provides an "Undo / Provide Now" button if the user later obtains the document.
+5. Explicit Retry / Resume Actions:
+   - "🔄 Resume Review (New Run)" action button in header and bottom of workspace.
+   - Rerender guard: reviews are only triggered on explicit user button click, preventing duplicate submissions or automatic execution caused by Streamlit widget rerenders.
+   - Resuming creates an explicit new run record (`run_id` distinct, `packet_version` incremented) linked to the same case.
+   - Prior review runs and packets are retained in SQLite history and accessible via a historical runs drawer in the UI.
+6. Tool Budget Enforcement:
+   - `ReviewService.execute_review()` bounds tool budget to a maximum of 8 calls (`min(max(1, tool_budget), 8)`).
+   - If bounded budget is reached and the review is incomplete, sets `stopped_reason="tool_limit_reached"`.
+   - Unexpected runner exceptions produce an honest packet snapshot with `review_status="incomplete"`, `stopped_reason="processing_error"`.
 Interfaces changed:
-- Added module `src/admitsense/storage/review_repository.py` (`ReviewRepository`).
-- Added module `src/admitsense/review/` (`service.py` exporting `ReviewService`, `FixtureReviewRunner`).
-- Exported `ReviewRepository` in `src/admitsense/storage/__init__.py`.
-- Exported `ReviewService` and `FixtureReviewRunner` in `src/admitsense/review/__init__.py`.
-- Updated `src/admitsense/app.py` to initialize `ReviewRepository` and `ReviewService` in session state.
-- Updated `src/admitsense/ui/workspace_view.py` to wire `review_repo` and `review_service`.
+- `src/admitsense/storage/database.py`:
+  - Added table `tool_activity_events` (`id`, `run_id`, `case_id`, `step_number`, `tool_name`, `tool_arguments_json`, `status`, `summary`, `error`, `created_at`).
+  - Added index `idx_checklist_case` on `checklist_items(case_id)`.
+- `src/admitsense/storage/review_repository.py`:
+  - Added `save_activity_event(event: ToolActivityEvent, case_id: str) -> None`.
+  - Added `list_activity_events(run_id: str | None = None, case_id: str | None = None) -> list[ToolActivityEvent]`.
+  - Added `update_checklist_item_status(case_id: str, item_id: str, status: ChecklistStatus, resolution_note: str | None = None) -> None`.
+  - Updated `save_review_packet()` to preserve user-provided checklist statuses across incremental runs.
+- `src/admitsense/review/service.py`:
+  - Enhanced `execute_review(case_id, event_callback, tool_budget, timeout_seconds)` to auto-persist activity events, clamp tool budget to 8, increment `packet_version` relative to `prior_packet`, and catch runner errors honestly.
+- `src/admitsense/ui/workspace_view.py`:
+  - Added dynamic review button with rerun guard.
+  - Added Tool Activity Log accordion displaying SQLite-persisted tool events.
+  - Added "I Don't Have This" checklist button and status chip.
+  - Added Follow-Up Answer input form recording `FactSource(source_type="user_provided")`.
+  - Added Historical Review Runs drawer.
 Checks and results:
-- `pytest tests/test_review_repository.py` -> 3/3 passed.
-- `pytest` (full test suite) -> 71/71 passed.
-- `python tests/verify_m3.py` -> 7/7 checks passed (partial case setup, base policy ingestion, review execution, waiting period finding with physical p14 citation, missing-evidence checklist, persistence/reload across restart, endorsement re-review progression with revision tracking, historical packet listing).
-- `python tests/verify_m2.py` -> 8/8 checks passed.
+- `pytest tests/test_m4_followup.py` -> 5/5 passed.
+- `pytest` (full test suite) -> 85/85 passed in 5.38s.
+- `python tests/verify_m4.py` -> 7/7 checks passed (tool activity persistence, run status and partial results display, user fact answering with provenance, "I don't have this" survival across restart, explicit new run creation retaining history, tool budget capping at <= 8, honest error reporting).
 - `python tests/verify_m1.py` -> 5/5 checks passed.
+- `python tests/verify_m2.py` -> 8/8 checks passed.
+- `python tests/verify_m3.py` -> 8/8 checks passed.
 Mocks / limitations / blockers:
-- `FixtureReviewRunner` is currently used as an interim development adapter while Owner B completes live LLM review logic (`M3-B`). It is clearly labelled in the UI and stop_details.
+- Application-level tool budget is enforced at <= 8 calls in `ReviewService`.
+- Backend agent dynamic tool selection and internal tool loop timeout (`M4-B`) are owned by Owner B; `ReviewService` seamlessly supports any runner adhering to `ReviewRunnerProtocol` that streams `ToolActivityEvent`.
 Next action for other owner:
-- Owner B can implement the live review runner (`M3-B`) adhering to `ReviewRunnerProtocol.run_review(case, retrieval, prior_packet, ...)`.
-- For `M3-I`, replace `FixtureReviewRunner` in `ReviewService` with Owner B's live runner and test the upload-to-review journey end-to-end.
+- Owner B can implement dynamic tool selection, strict per-call validation, and internal stopping rules (`M4-B`).
+- When Owner B executes tool calls, emitting `event_callback(ToolActivityEvent(...))` automatically streams and persists them into the UI and SQLite.
+- Complete joint integration `M4-I` by verifying that Owner B's agent obeys tool budget and streaming events under prompt injection and edge cases.

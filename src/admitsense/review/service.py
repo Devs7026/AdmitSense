@@ -256,27 +256,82 @@ class ReviewService:
         self,
         case_id: str,
         user_answers: dict[str, Any] | None = None,
+        event_callback: Callable[[Any], None] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
-        event_callback: Callable[[Any], None] | None = None,
     ) -> ReviewPacket:
-        """Loads case facts, runs review analysis, and persists the resulting packet snapshot."""
+        """
+        Loads case facts, runs review analysis, and persists the resulting packet snapshot.
+        Enforces tool budget (max 8) and streams/persists actual tool events.
+        """
         case = self.case_repo.get_case(case_id)
         if not case:
             raise KeyError(f"Case '{case_id}' does not exist.")
 
         prior_packet = self.review_repo.get_latest_review_packet(case_id)
 
-        # Run analysis through agreed entry point
-        packet = self.runner.run_review(
-            case=case,
-            retrieval=self.retrieval,
-            prior_packet=prior_packet,
-            user_answers=user_answers,
-            tool_budget=tool_budget,
-            timeout_seconds=timeout_seconds,
-            event_callback=event_callback,
-        )
+        # Enforce budget boundary
+        bounded_budget = min(max(1, tool_budget), 8)
+
+        def persisting_callback(event: Any) -> None:
+            try:
+                self.review_repo.save_activity_event(event, case_id=case_id)
+            except Exception:
+                pass
+            if event_callback is not None:
+                try:
+                    event_callback(event)
+                except Exception:
+                    pass
+
+        try:
+            # Run analysis through agreed entry point
+            packet = self.runner.run_review(
+                case=case,
+                retrieval=self.retrieval,
+                prior_packet=prior_packet,
+                user_answers=user_answers,
+                tool_budget=bounded_budget,
+                timeout_seconds=timeout_seconds,
+                event_callback=persisting_callback,
+            )
+            # Check tool budget enforcement
+            if (
+                packet.tool_steps_used >= bounded_budget
+                and packet.review_status != "complete"
+                and packet.stopped_reason not in {"missing_information", "timeout"}
+            ):
+                packet = packet.model_copy(
+                    update={
+                        "stopped_reason": "tool_limit_reached",
+                        "stop_details": f"Execution halted after reaching tool budget ({packet.tool_steps_used}/{bounded_budget} steps). Validated partial findings preserved.",
+                    }
+                )
+        except Exception as exc:
+            # Honest error state reporting
+            run_id = f"run-err-{uuid.uuid4().hex[:8]}"
+            next_version = (prior_packet.packet_version + 1) if prior_packet else 1
+            packet = ReviewPacket(
+                packet_id=f"pkt-{case.case_id}-{uuid.uuid4().hex[:6]}",
+                packet_version=next_version,
+                run_id=run_id,
+                generated_at=_utc_now(),
+                case=case,
+                review_status="incomplete",
+                findings=prior_packet.findings if prior_packet else [],
+                revisions=prior_packet.revisions if prior_packet else [],
+                document_applicability=[],
+                missing_evidence_checklist=prior_packet.missing_evidence_checklist if prior_packet else [],
+                unresolved_questions=prior_packet.unresolved_questions if prior_packet else [f"Review halted due to processing error: {exc}"],
+                authorization_status="not verified",
+                tool_steps_used=0,
+                stopped_reason="processing_error",
+                stop_details=f"Execution error: {exc}",
+            )
+
+        # Ensure packet version is incremented when resuming
+        if prior_packet and packet.packet_version <= prior_packet.packet_version:
+            packet = packet.model_copy(update={"packet_version": prior_packet.packet_version + 1})
 
         # Persist snapshot atomically
         saved_packet = self.review_repo.save_review_packet(packet)
@@ -286,15 +341,15 @@ class ReviewService:
         self,
         case_id: str,
         user_answers: dict[str, Any] | None = None,
+        event_callback: Callable[[Any], None] | None = None,
         tool_budget: int = 8,
         timeout_seconds: float = 30.0,
-        event_callback: Callable[[Any], None] | None = None,
     ) -> ReviewPacket:
         """Explicit resumption of an existing review using user answers / saved facts."""
         return self.execute_review(
             case_id=case_id,
             user_answers=user_answers,
+            event_callback=event_callback,
             tool_budget=tool_budget,
             timeout_seconds=timeout_seconds,
-            event_callback=event_callback,
         )
