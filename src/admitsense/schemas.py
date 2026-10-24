@@ -291,13 +291,15 @@ class Revision(SchemaModel):
 
 
 class HospitalRecordReference(SchemaModel):
+    """Synthetic hospital reference record conforming to CONTRACTS.md Section 3.4."""
+
     record_id: NonEmptyStr = Field(description="Unique synthetic record ID, e.g. hosp-synth-001")
     dataset_version: NonEmptyStr = Field(description="Synthetic dataset version, e.g. v2026.1")
     dataset_date: date = Field(description="Publication date of synthetic dataset")
     hospital_name: NonEmptyStr
     city: NonEmptyStr
     network_tier: Literal["tier_1", "tier_2", "non_network", "unspecified"] = "unspecified"
-    tpa_desk_contact: str | None = None
+    tpa_desk_contact: NonEmptyStr | None = None
     is_synthetic: bool = Field(default=True, description="Strictly true for all synthetic demonstration records")
     limitations: list[NonEmptyStr] = Field(
         default_factory=lambda: [
@@ -348,6 +350,9 @@ class ReviewPacket(SchemaModel):
     authorization_status: AuthorizationStatus = "not verified"
     authorization_evidence: list[Evidence] = Field(default_factory=list)
 
+    # Synthetic hospital reference directory entry (M6)
+    hospital_record: HospitalRecordReference | None = None
+
     # This validates recorded usage; the execution loop enforces the cap.
     tool_steps_used: int = Field(default=0, ge=0, le=8)
     stopped_reason: StopReason
@@ -355,6 +360,12 @@ class ReviewPacket(SchemaModel):
 
     @model_validator(mode="after")
     def validate_packet(self) -> Self:
+        # Synchronize hospital_record and hospital_reference
+        if self.hospital_record and not self.hospital_reference:
+            self.hospital_reference = self.hospital_record
+        elif self.hospital_reference and not self.hospital_record:
+            self.hospital_record = self.hospital_reference
+
         if (
             self.authorization_status == "pending insurer review"
             and not self.authorization_evidence

@@ -17,8 +17,13 @@ from admitsense.documents.synthetic import (
     build_synthetic_schedule_pdf,
     build_synthetic_unreadable_pdf,
 )
+from admitsense.documents.hospital_directory import (
+    HospitalLookupResult,
+    LocalSyntheticHospitalDirectory,
+)
+from admitsense.export import generate_review_packet_html
 from admitsense.review.service import ReviewService
-from admitsense.schemas import CaseDetails, Evidence, FactSource, ReviewPacket
+from admitsense.schemas import CaseDetails, Evidence, FactSource, HospitalRecordReference, ReviewPacket
 from admitsense.storage.case_repository import CaseRepository
 from admitsense.storage.review_repository import ReviewRepository
 from admitsense.ui.components import render_authorization_badge
@@ -216,6 +221,54 @@ def render_workspace_view(
                             unsafe_allow_html=True,
                         )
                 st.markdown("<hr style='margin: 0.35rem 0;'>", unsafe_allow_html=True)
+
+        # Hospital Directory Reference (Synthetic Demonstration)
+        st.markdown("### 🏥 Hospital Directory Reference (Demonstration Data)")
+        hosp_dir = LocalSyntheticHospitalDirectory()
+        hosp_res = hosp_dir.lookup_hospital(case.hospital_name)
+        if hosp_res.status == "matched" and hosp_res.record:
+            rec = hosp_res.record
+            st.markdown(
+                f"""
+                <div style="background-color: #faf5ff; border: 1px solid #d8b4fe; border-left: 5px solid #8b5cf6; border-radius: 8px; padding: 0.85rem 1.15rem; margin-top: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <span style="background-color: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; font-weight: 700;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <h4 style="margin: 0.35rem 0 0.15rem 0; font-size: 1.05rem; color: #1e1b4b;">{rec.hospital_name}</h4>
+                            <span style="font-size: 0.85rem; color: #475569;">
+                                City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Dataset Version: <strong>{rec.dataset_version}</strong> ({rec.dataset_date.strftime('%d %b %Y')})
+                            </span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">{rec.network_tier.replace('_', ' ')}</span>
+                            <div style="font-size: 0.8rem; color: #475569; margin-top: 0.3rem;">
+                                TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.65rem; font-size: 0.8rem; color: #6b21a8; background-color: #f3e8ff; padding: 0.45rem 0.75rem; border-radius: 4px;">
+                        ⚠️ <strong>Invariant & Limitations:</strong> Synthetic hospital directory match does NOT verify live insurer network status, cashless eligibility, or claim approval. Cashless agreements must be verified directly with the hospital admission desk and insurance TPA.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif hosp_res.status == "no_match":
+            st.warning(
+                f"⚠️ **No Directory Match**: '{hosp_res.query}' was not found in the synthetic hospital dataset ({hosp_res.dataset_version}). "
+                "Confirm facility network credentials directly with the hospital admission desk."
+            )
+        elif hosp_res.status == "ambiguous_match":
+            candidate_list = ", ".join(f"'{c.hospital_name}'" for c in hosp_res.candidates)
+            st.warning(
+                f"⚠️ **Ambiguous Match**: Multiple facilities match '{hosp_res.query}': {candidate_list}. "
+                "Specify the exact facility name in Case Setup."
+            )
+        else:
+            st.info(
+                "ℹ️ **Hospital Not Specified**: No hospital name was provided in case details. "
+                "Specify a hospital facility in Case Setup to view synthetic directory reference."
+            )
 
     # 2. Findings & Review
     with tab_review:
@@ -553,7 +606,7 @@ def render_workspace_view(
                                 </div>
                                 <div style="text-align: right;">
                                     <span style="font-weight: 700; font-size: 0.8rem; color: {'#16a34a' if pkt.review_status == 'complete' else '#ea580c'};">{pkt.review_status.upper()}</span><br>
-                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.created_at.strftime('%H:%M:%S') if pkt.created_at else ''}</span>
+                                    <span style="font-size: 0.75rem; color: #94a3b8;">{pkt.generated_at.strftime('%H:%M:%S') if getattr(pkt, 'generated_at', None) else ''}</span>
                                 </div>
                             </div>
                             """,
@@ -1102,10 +1155,227 @@ def render_workspace_view(
 
 
     with tab_export:
-        st.info(
-            "ℹ️ **Packet Export (Milestone M6)**: Deterministic, self-contained HTML export rendering "
-            "the exact saved review snapshot will be integrated in M6."
+        st.subheader("📥 Review Packet Preview & Deterministic Export")
+        st.caption(
+            "Preview and download an immutable, self-contained HTML Review Packet for administrative "
+            "preparation, hospital admission desk clarification, and insurer correspondence."
         )
+
+        # 1. Collect available packets
+        all_packets: list[ReviewPacket] = []
+        if review_repo:
+            all_packets = review_repo.list_review_packets(case.case_id)
+        if not all_packets and persisted_packet:
+            all_packets = [persisted_packet]
+
+        selected_export_packet: ReviewPacket | None = None
+
+        if all_packets:
+            if len(all_packets) > 1:
+                packet_options = {
+                    f"v{p.packet_version} • {p.packet_id} ({p.generated_at.strftime('%H:%M:%S UTC')}) — {p.review_status.upper()}": p
+                    for p in all_packets
+                }
+                selected_label = st.selectbox(
+                    "Select Packet Snapshot Version to Preview & Export:",
+                    options=list(packet_options.keys()),
+                    index=0,
+                    key="export_packet_version_selector",
+                )
+                selected_export_packet = packet_options[selected_label]
+            else:
+                selected_export_packet = all_packets[0]
+        else:
+            st.info(
+                "ℹ️ **No Review Packet Yet**: No analysis has been executed yet for this case. "
+                "Execute a review in the **🔍 Findings & Review** tab to produce a saved review packet."
+            )
+            with st.expander("🧪 Preview & Export Sample Review Packet (M6 Demonstration)", expanded=False):
+                st.caption("Demonstrates the M6 HTML export and preview format using a sample fixture.")
+                sample_pkt = _load_sample_packet_fixture("supported_finding")
+                if sample_pkt:
+                    selected_export_packet = sample_pkt
+
+        if selected_export_packet:
+            # Perform hospital lookup
+            hosp_directory = LocalSyntheticHospitalDirectory()
+            hosp_result = hosp_directory.lookup_hospital(case.hospital_name)
+
+            # Generate deterministic HTML string
+            exported_html = generate_review_packet_html(
+                packet=selected_export_packet,
+                hospital_result=hosp_result,
+                available_documents=documents,
+            )
+
+            # Prominent Action Bar
+            col_dl1, col_dl2 = st.columns([2, 3])
+            with col_dl1:
+                st.download_button(
+                    label=f"📥 Download Review Packet (v{selected_export_packet.packet_version} HTML)",
+                    data=exported_html,
+                    file_name=f"review_packet_{case.case_id}_v{selected_export_packet.packet_version}.html",
+                    mime="text/html",
+                    type="primary",
+                    use_container_width=True,
+                )
+            with col_dl2:
+                st.caption(
+                    "✅ **Deterministic Export**: Rendered directly from the saved SQLite snapshot without "
+                    "re-running model queries. Standalone file opens independently in any browser."
+                )
+
+            st.markdown("---")
+
+            # ----------------------------------------------------------
+            # 2. Live Review Packet Preview
+            # ----------------------------------------------------------
+            st.markdown("### 📄 Review Packet Live Preview")
+
+            # Status Banner & Metadata Header
+            st.markdown(
+                f"""
+                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-size: 1.25rem; font-weight: 800; color: #1e3a8a;">AdmitSense Review Packet</span><br>
+                            <span style="font-size: 0.85rem; color: #64748b;">
+                                Packet ID: <code>{selected_export_packet.packet_id}</code> &bull; Version: <strong>v{selected_export_packet.packet_version}</strong> &bull; Run: <code>{selected_export_packet.run_id}</code>
+                            </span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="background-color: {'#16a34a' if selected_export_packet.review_status == 'complete' else '#ea580c'}; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem;">
+                                {selected_export_packet.review_status.upper()}
+                            </span><br>
+                            <span style="font-size: 0.75rem; color: #94a3b8;">{selected_export_packet.generated_at.strftime('%d %b %Y, %H:%M:%S UTC')}</span>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Incomplete Notice
+            if selected_export_packet.review_status != "complete" or selected_export_packet.stopped_reason != "review_complete":
+                stopped_label = persisted_reason_label(selected_export_packet.stopped_reason)
+                st.warning(
+                    f"⚠️ **Incomplete Review Packet Notice • Stop Reason: {stopped_label.upper()}**\n\n"
+                    f"This review packet represents partial or bounded execution results. "
+                    f"Stop details: {selected_export_packet.stop_details or 'Budget or timeout reached'}. "
+                    "Findings, checklist items, and limitations reflect documents reviewed prior to stop."
+                )
+
+            # Mandatory Insurer Authorisation Banner
+            render_authorization_badge(selected_export_packet.authorization_status)
+            st.info(
+                "🛡️ **Authorisation Invariant Notice**: AdmitSense assists administrative preparation for planned hospital "
+                "admission. Findings describe condition satisfaction against available documents; they do NOT establish "
+                "overall insurance policy coverage, cashless eligibility, or insurer approval."
+            )
+
+            # Case & Admission Details
+            with st.expander("📋 1. Case & Planned Admission Details", expanded=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.markdown(f"**Patient Name:** {case.member_name or 'Unknown'}")
+                    st.markdown(f"**Policy ID:** `{case.policy_id or 'Unknown'}`")
+                with c2:
+                    st.markdown(f"**Procedure:** {case.procedure or 'Unknown'}")
+                    st.markdown(f"**Planned Admission:** {case.planned_admission_date.strftime('%d %b %Y') if case.planned_admission_date else 'Unknown'}")
+                with c3:
+                    st.markdown(f"**Coverage Start:** {case.continuous_coverage_start_date.strftime('%d %b %Y') if case.continuous_coverage_start_date else 'Unknown'}")
+                    st.markdown(f"**Estimated Cost:** {f'INR {case.estimated_cost:,.2f}' if case.estimated_cost else 'Unknown'}")
+
+            # Hospital Reference Display
+            with st.expander("🏥 2. Hospital Directory Reference (Demonstration Data)", expanded=True):
+                if hosp_result.status == "matched" and hosp_result.record:
+                    rec = hosp_result.record
+                    st.markdown(
+                        f"""
+                        <div style="background-color: #faf5ff; border: 1px solid #d8b4fe; border-left: 5px solid #8b5cf6; border-radius: 6px; padding: 0.75rem 1rem;">
+                            <span style="background-color: #f3e8ff; color: #6b21a8; font-weight: 700; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">SYNTHETIC DEMONSTRATION DATA</span>
+                            <h4 style="margin: 0.25rem 0 0.1rem 0;">{rec.hospital_name}</h4>
+                            <div style="font-size: 0.85rem; color: #475569;">
+                                City: <strong>{rec.city}</strong> &bull; Record ID: <code>{rec.record_id}</code> &bull; Tier: <strong>{rec.network_tier.upper().replace('_', ' ')}</strong> &bull; TPA Desk: <strong>{rec.tpa_desk_contact or 'Not listed'}</strong>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.35rem;">
+                                Dataset Version: <strong>{rec.dataset_version}</strong> &bull; Date: {rec.dataset_date.strftime('%d %b %Y')}
+                            </div>
+                            <div style="font-size: 0.8rem; color: #6b21a8; background-color: #f3e8ff; padding: 0.45rem 0.65rem; border-radius: 4px; margin-top: 0.5rem;">
+                                ⚠️ <strong>Notice:</strong> Synthetic hospital directory match does NOT verify live insurer network agreement, cashless eligibility, or claim approval.
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                elif hosp_result.status == "no_match":
+                    st.warning(f"⚠️ **No Directory Match**: '{hosp_result.query}' was not found in synthetic dataset ({hosp_result.dataset_version}).")
+                elif hosp_result.status == "ambiguous_match":
+                    candidate_str = ", ".join(f"'{c.hospital_name}'" for c in hosp_result.candidates)
+                    st.warning(f"⚠️ **Ambiguous Match**: Multiple facilities match query: {candidate_str}.")
+                else:
+                    st.info("ℹ️ **Hospital Not Specified**: No hospital facility recorded in case facts.")
+
+            # Documents Reviewed
+            with st.expander(f"📄 3. Documents Reviewed ({len(documents)})", expanded=False):
+                if documents:
+                    for d in documents:
+                        st.markdown(f"- **{d.filename}** (`{d.document_id}`, {d.version}) — {d.page_count} pages [{d.extraction_status}]")
+                else:
+                    st.caption("No document records attached.")
+
+            # Current Findings
+            with st.expander(f"🔍 4. Administrative Findings ({len(selected_export_packet.findings)})", expanded=True):
+                for f in selected_export_packet.findings:
+                    f_color = "#16a34a" if f.status == "supported" else ("#ea580c" if f.status == "unresolved" else "#dc2626")
+                    st.markdown(
+                        f"""
+                        <div style="border: 1px solid #e2e8f0; border-left: 4px solid {f_color}; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; background: white;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <strong>Rev {f.revision} &bull; {f.topic}</strong>
+                                <span style="font-weight: 700; font-size: 0.75rem; color: {f_color}; text-transform: uppercase;">{f.status}</span>
+                            </div>
+                            <p style="margin: 0.4rem 0 0.4rem 0; font-size: 0.9rem;">{f.conclusion}</p>
+                            <div style="font-size: 0.85rem; color: #166534; background: #f0fdf4; padding: 0.4rem 0.6rem; border-radius: 4px;">
+                                <strong>Next Action:</strong> {f.next_action}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if f.evidence:
+                        for ev in f.evidence:
+                            st.caption(f"📍 Cited: `{ev.document_id}` ({ev.document_version}), Page {ev.page}: *\"{ev.quote[:100]}...\"*")
+
+            # Missing Evidence Checklist
+            with st.expander(f"📝 5. Missing Evidence Checklist ({len(selected_export_packet.missing_evidence_checklist)})", expanded=True):
+                if selected_export_packet.missing_evidence_checklist:
+                    for item in selected_export_packet.missing_evidence_checklist:
+                        st.markdown(f"- **{item.requested_information}** [{item.status.upper()}] — *{item.why_it_matters}* (Source: {item.suggested_source or 'Caregiver'})")
+                else:
+                    st.caption("No missing evidence items recorded.")
+
+            # Questions for Hospital Desk / Insurer
+            with st.expander("❓ 6. Questions for Hospital Admission Desk & Insurer", expanded=True):
+                q_items = list(selected_export_packet.unresolved_questions)
+                for item in selected_export_packet.missing_evidence_checklist:
+                    if item.status == "requested":
+                        q_items.append(f"Ask {item.suggested_source or 'admission desk'}: {item.requested_information} ({item.why_it_matters})")
+                if q_items:
+                    for q in q_items:
+                        st.markdown(f"- ❓ {q}")
+                else:
+                    st.caption("No unresolved questions recorded.")
+
+            # Revisions History
+            if selected_export_packet.revisions:
+                with st.expander(f"🔄 7. Revision Audit Trail ({len(selected_export_packet.revisions)})", expanded=False):
+                    for rev in selected_export_packet.revisions:
+                        st.markdown(
+                            f"- **{rev.finding_id}**: Rev {rev.old_finding_revision} ({rev.old_status}) &rarr; **Rev {rev.new_finding_revision} ({rev.new_status})** &bull; Trigger: `{rev.trigger_type}`<br>"
+                            f"  *Reason:* {rev.reason}",
+                            unsafe_allow_html=True,
+                        )
 
 
 def persisted_reason_label(reason: str) -> str:

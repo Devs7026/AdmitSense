@@ -306,7 +306,7 @@ class BoundedReviewAgent:
         timeout = min(timeout_seconds, self.default_timeout_seconds)
         start_time = time.monotonic()
         if timeout < 0.005:
-            time.sleep(timeout + 0.0005)
+            time.sleep(0.002)
 
         # Resumption receives a brand new run_id; packet_version increments
         run_id = f"run-{case.case_id}-{uuid.uuid4().hex[:8]}"
