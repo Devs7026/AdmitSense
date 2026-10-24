@@ -27,9 +27,33 @@ class ReviewRepository:
         4. Inserts missing evidence checklist items.
         """
         now = _utc_now_iso()
+        case_id = packet.case.case_id
+
+        # Preserve user-declared statuses (e.g. "user_does_not_have") across re-reviews
+        with self.db.get_connection() as conn:
+            user_declared = conn.execute(
+                """
+                SELECT item_id, status, resolution_note FROM checklist_items
+                WHERE case_id = ? AND status IN ('user_does_not_have', 'provided_pending_review')
+                """,
+                (case_id,),
+            ).fetchall()
+            user_decl_map = {r["item_id"]: (r["status"], r["resolution_note"]) for r in user_declared}
+
+        if user_decl_map and packet.missing_evidence_checklist:
+            updated_items = []
+            for item in packet.missing_evidence_checklist:
+                if item.item_id in user_decl_map:
+                    prev_status, prev_note = user_decl_map[item.item_id]
+                    updated_items.append(
+                        item.model_copy(update={"status": prev_status, "resolution_note": prev_note})
+                    )
+                else:
+                    updated_items.append(item)
+            packet = packet.model_copy(update={"missing_evidence_checklist": updated_items})
+
         packet_dict = packet.model_dump(mode="json")
         packet_json = json.dumps(packet_dict)
-        case_id = packet.case.case_id
 
         with self.db.get_connection() as conn:
             # 1. Insert review_packets
@@ -240,3 +264,133 @@ class ReviewRepository:
                 }
                 revisions.append(Revision.model_validate(rev_dict))
             return revisions
+
+    def update_checklist_item_status(
+        self,
+        case_id: str,
+        item_id: str,
+        status: str,
+        resolution_note: str | None = None,
+    ) -> ReviewPacket | None:
+        """
+        Updates a checklist item's status (e.g. 'user_does_not_have' or 'provided_pending_review')
+        and persists atomically into both the relational table and the latest ReviewPacket JSON.
+        """
+        with self.db.get_connection() as conn:
+            # 1. Update relational table
+            conn.execute(
+                """
+                UPDATE checklist_items
+                SET status = ?, resolution_note = ?
+                WHERE case_id = ? AND item_id = ?
+                """,
+                (status, resolution_note, case_id, item_id),
+            )
+
+            # 2. Update snapshot JSON in latest review_packets row
+            row = conn.execute(
+                """
+                SELECT packet_id, packet_json FROM review_packets
+                WHERE case_id = ?
+                ORDER BY packet_version DESC, created_at DESC
+                LIMIT 1
+                """,
+                (case_id,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            packet_data = json.loads(row["packet_json"])
+            chk_list = packet_data.get("missing_evidence_checklist", [])
+            item_found = False
+            for chk in chk_list:
+                if chk.get("item_id") == item_id:
+                    chk["status"] = status
+                    chk["resolution_note"] = resolution_note
+                    item_found = True
+                    break
+
+            if item_found:
+                new_json = json.dumps(packet_data)
+                conn.execute(
+                    """
+                    UPDATE review_packets
+                    SET packet_json = ?
+                    WHERE packet_id = ?
+                    """,
+                    (new_json, row["packet_id"]),
+                )
+
+            return ReviewPacket.model_validate(packet_data)
+
+    def save_activity_event(self, event: Any, case_id: str) -> None:
+        """Persist a tool activity event into the database."""
+        run_id = getattr(event, "run_id", "") or (event.get("run_id", "") if isinstance(event, dict) else "")
+        step_number = getattr(event, "step_number", 0) or (event.get("step_number", 0) if isinstance(event, dict) else 0)
+        tool_name = getattr(event, "tool_name", "") or (event.get("tool_name", "") if isinstance(event, dict) else "")
+        tool_args = getattr(event, "tool_arguments", {}) or (event.get("tool_arguments", {}) if isinstance(event, dict) else {})
+        status = getattr(event, "status", "completed") or (event.get("status", "completed") if isinstance(event, dict) else "completed")
+        summary = getattr(event, "summary", "") or (event.get("summary", "") if isinstance(event, dict) else "")
+        error = getattr(event, "error", None) or (event.get("error", None) if isinstance(event, dict) else None)
+        created_at = getattr(event, "timestamp", None)
+        created_at_iso = created_at.isoformat() if isinstance(created_at, datetime) else _utc_now_iso()
+
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO tool_activity_events (
+                    run_id, case_id, step_number, tool_name, tool_arguments_json, status, summary, error, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    case_id,
+                    step_number,
+                    tool_name,
+                    json.dumps(tool_args),
+                    status,
+                    summary,
+                    error,
+                    created_at_iso,
+                ),
+            )
+
+    def list_activity_events(
+        self,
+        run_id: str | None = None,
+        case_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List tool activity events matching run_id or case_id in chronological order."""
+        with self.db.get_connection() as conn:
+            if run_id:
+                rows = conn.execute(
+                    "SELECT * FROM tool_activity_events WHERE run_id = ? ORDER BY id ASC",
+                    (run_id,),
+                ).fetchall()
+            elif case_id:
+                rows = conn.execute(
+                    "SELECT * FROM tool_activity_events WHERE case_id = ? ORDER BY id ASC",
+                    (case_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tool_activity_events ORDER BY id ASC"
+                ).fetchall()
+
+            events = []
+            for r in rows:
+                events.append({
+                    "id": r["id"],
+                    "run_id": r["run_id"],
+                    "case_id": r["case_id"],
+                    "step_number": r["step_number"],
+                    "tool_name": r["tool_name"],
+                    "tool_arguments": json.loads(r["tool_arguments_json"]),
+                    "status": r["status"],
+                    "summary": r["summary"],
+                    "error": r["error"],
+                    "created_at": r["created_at"],
+                })
+            return events
+

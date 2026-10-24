@@ -170,5 +170,23 @@ class Database:
                     PRIMARY KEY (item_id, packet_id),
                     FOREIGN KEY (packet_id) REFERENCES review_packets(packet_id) ON DELETE CASCADE
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_checklist_case ON checklist_items(case_id);
+
+                CREATE TABLE IF NOT EXISTS tool_activity_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    step_number INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    tool_arguments_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    error TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_activity_run ON tool_activity_events(run_id);
+                CREATE INDEX IF NOT EXISTS idx_activity_case ON tool_activity_events(case_id);
                 """
             )

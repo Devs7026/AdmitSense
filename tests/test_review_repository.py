@@ -96,3 +96,75 @@ def test_persistence_across_database_restart(temp_review_repo):
     assert loaded.review_status == "complete"
     assert len(loaded.findings) == len(SAMPLE_SUPPORTED_FINDING_PACKET.findings)
     assert loaded.findings[0].conclusion == SAMPLE_SUPPORTED_FINDING_PACKET.findings[0].conclusion
+
+
+def test_update_checklist_item_status_and_preservation(temp_review_repo):
+    review_repo, case_repo, _ = temp_review_repo
+
+    case_repo.create_case(SAMPLE_INCOMPLETE_REVIEW_PACKET.case)
+    review_repo.save_review_packet(SAMPLE_INCOMPLETE_REVIEW_PACKET)
+
+    # 1. Update checklist item status to user_does_not_have
+    updated = review_repo.update_checklist_item_status(
+        case_id="case-fixture-001",
+        item_id="chk-hernia-coverage-dates",
+        status="user_does_not_have",
+        resolution_note="Caregiver declared portability certificate unavailable.",
+    )
+    assert updated is not None
+    assert updated.missing_evidence_checklist[0].status == "user_does_not_have"
+    assert "Caregiver declared" in updated.missing_evidence_checklist[0].resolution_note
+
+    # 2. Reload from database and verify persistence
+    reloaded = review_repo.get_latest_review_packet("case-fixture-001")
+    assert reloaded is not None
+    assert reloaded.missing_evidence_checklist[0].status == "user_does_not_have"
+
+    # 3. Save a newer packet version and verify user_does_not_have is preserved
+    new_packet = SAMPLE_INCOMPLETE_REVIEW_PACKET.model_copy(
+        update={
+            "packet_id": "pkt-fixture-incomplete-003",
+            "packet_version": 2,
+            "run_id": "run-fixture-003",
+        }
+    )
+    saved_v2 = review_repo.save_review_packet(new_packet)
+    assert saved_v2.missing_evidence_checklist[0].status == "user_does_not_have"
+
+
+def test_save_and_list_activity_events(temp_review_repo):
+    review_repo, case_repo, _ = temp_review_repo
+
+    event_1 = {
+        "run_id": "run-m4-001",
+        "step_number": 1,
+        "tool_name": "search_pages",
+        "tool_arguments": {"query": "waiting period"},
+        "status": "completed",
+        "summary": "Searching policy pages for 'waiting period'",
+        "error": None,
+    }
+    event_2 = {
+        "run_id": "run-m4-001",
+        "step_number": 2,
+        "tool_name": "read_page",
+        "tool_arguments": {"document_id": "doc-01", "page_number": 14},
+        "status": "completed",
+        "summary": "Reading candidate document doc-01 page 14",
+        "error": None,
+    }
+
+    review_repo.save_activity_event(event_1, case_id="case-001")
+    review_repo.save_activity_event(event_2, case_id="case-001")
+
+    events = review_repo.list_activity_events(run_id="run-m4-001")
+    assert len(events) == 2
+    assert events[0]["step_number"] == 1
+    assert events[0]["tool_name"] == "search_pages"
+    assert events[1]["step_number"] == 2
+    assert events[1]["tool_name"] == "read_page"
+
+    # Query by case_id
+    case_events = review_repo.list_activity_events(case_id="case-001")
+    assert len(case_events) == 2
+
