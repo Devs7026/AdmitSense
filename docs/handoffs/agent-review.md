@@ -1,39 +1,33 @@
-Updated: 2026-10-24T11:32:00+05:30
-Owner / task: OWNER B / M1-B & M1-I Integration
-Branch / implementation commit or PR: dev-agent -> main
-Delivery state: integrated
+Updated: 2026-10-24T11:47:00+05:30
+Owner / task: OWNER B / M2-B
+Branch / implementation commit or PR: dev-agent (local working tree)
+Delivery state: local
 Implemented:
-- Completed Milestone M1-B (Case model validation & sample review outputs):
-  - Verified CaseDetails allows minimal case creation with only case_id; missing facts remain None.
-  - Verified FactSource provenance enforcement (user_provided, document requiring Evidence, derived requiring explanation; 1-to-1 mapping with case facts).
-  - Authored and verified 4 sample fixtures in tests/fixtures/sample_review_packets.py and tests/fixtures/json/:
-    1. incomplete_review: Unresolved finding, missing continuous coverage date, checklist item.
-    2. supported_finding: Supported finding with exact physical PDF page 14 citation.
-    3. conflict_review: Conflict between base policy and post-dated endorsement, uncertain applicability.
-    4. revised_finding: Evidence Change Replay audit trail (revision 1 -> 2).
-  - Provided documented loader helpers in tests/fixtures/: get_sample_packet, load_sample_packet_from_json, list_sample_packet_names.
-- Completed Milestone M1-I (Combined Milestone Integration):
-  - Fetched and merged origin/main (containing Owner A's M1-A implementation: SQLite storage, CaseRepository, Streamlit UI views, and workspace development fixture loading).
-  - Resolved merge conflict in docs/TASKS.md cleanly preserving both M1-A and M1-B progress.
-  - Ran full combined test suite: 29/29 pytest unit and integration tests passing.
-  - Ran Owner A's automated verification runner (tests/verify_m1.py): all 5/5 verification checks passed.
+- Built case-scoped evidence retrieval and citation verification service in src/admitsense/agent/retrieval.py (EvidenceRetrievalService):
+  - search_pages(case_id, query, document_id, max_results): case-scoped term/phrase search with term coverage and stopword weighting, returning PageSearchResult supporting both tuple unpacking and attribute access.
+  - read_page(document_id, version, page_number, case_id) and get_page_text(...): physical 1-based page reading enforcing document existence, exact version, bounds (1 <= page <= total_pages), and non-unreadable extraction status.
+  - verify_citation(evidence, case_id): citation verification enforcing physical page numbers > 0, case ownership, version match, page bounds, and quotation matching with documented whitespace normalization.
+  - Explicit failures with descriptive reasons for fabricated quotes, wrong-case references (CaseOwnershipError), version mismatches (VersionMismatchError), page out-of-bounds (PageOutOfBoundsError), and unreadable/error extraction states (DocumentUnreadableError).
+  - Whitespace normalization (normalize_whitespace): collapses multi-space/newline/tab sequences, standardizes smart quotes, dashes, and non-breaking spaces.
+- Authored labelled synthetic document fixtures in tests/fixtures/synthetic_documents.py:
+  - Base policy wording (doc-base-policy-star, v1, 18 physical pages with waiting period and exclusion clauses).
+  - Policy schedule (doc-schedule-9941, v1, 2 physical pages with member name and continuous coverage dates).
+  - Endorsement (doc-endorsement-2026-v1, v1, 1 page with post-dated effective date).
+  - Maternity Rider (doc-maternity-rider-v1, v1, 2 pages with 9-month waiting period).
+  - Unreadable document (doc-unreadable-scan-v1, v1, 3 pages, extraction_status="unreadable").
+  - Other-case document (doc-other-case-policy, case_id="case-other-999") to test cross-case isolation.
+- Independently specified ground-truth expected outcomes in tests/fixtures/expected_outcomes.py.
+- Authored test suite in tests/test_evidence_retrieval.py containing 28 tests covering search, bounds, case isolation, quotation matching, fabricated quotes, unreadable status, and evaluation against expected outcomes.
 Interfaces changed:
-- Added Section 3 (Proposed Agent & Review Interfaces) in docs/CONTRACTS.md:
-  - ReviewRunner protocol with run_review(...) signature.
-  - ToolActivityEvent schema for Streamlit execution telemetry.
-  - HospitalRecordReference schema for dated, versioned synthetic hospital lookups.
-  - compute_evidence_replay(...) signature.
-- Exposed loader functions in tests/fixtures/__init__.py:
-  - get_sample_packet(name: str) -> ReviewPacket
-  - load_sample_packet_from_json(path_or_name: str | Path) -> ReviewPacket
-  - list_sample_packet_names() -> list[str]
+- Implemented EvidenceRetrievalService in src/admitsense/agent/retrieval.py conforming to EvidenceRetrieval protocol in docs/CONTRACTS.md.
+- Added models: ExtractedPage, DocumentRecord, PageSearchResult, CitationVerificationResult.
 Checks and results:
-- pytest -v tests/ -> 29 passed in 1.54s (covering test_case_repository.py, test_case_validation.py, test_m1_integration.py, test_sample_fixtures.py).
-- python tests/verify_m1.py -> 5/5 verification checks passed (incomplete case, reopen, restart persistence, case isolation, sample fixture loading).
-- python src/admitsense/app.py -> verified clean startup.
+- pytest -v tests/test_evidence_retrieval.py -> 28 passed in 0.46s.
+- pytest -v tests/ -> 57 passed in 0.71s (28 retrieval, 15 case validation, 10 sample fixtures, 4 case repo).
+- python tests/verify_m1.py -> 5/5 verification checks passed.
 Mocks / limitations / blockers:
-- Sample review packets are development fixtures for UI/storage integration, not live review agent execution.
-- PDF upload and text extraction will be implemented in Milestone M2.
+- Retrieval service is currently tested against labelled synthetic document fixtures (tests/fixtures/synthetic_documents.py) while Owner A's PDF uploader and pypdf extraction (M2-A) are pending.
+- Integration check M2-I will verify EvidenceRetrievalService against Owner A's actual SQLite-persisted extracted documents.
 Next action for other owner:
-- Milestones M0 and M1 are fully integrated into main!
-- Owner A can begin Milestone M2-A: PDF upload limits/type checks, immutable versions, SHA-256 duplicate handling, pypdf extraction retaining 1-based page positions and blank pages, and document/page viewer.
+- Owner A to implement M2-A (PDF upload limits/type checks, immutable versions, SHA-256 duplicate handling, pypdf extraction retaining 1-based page positions and blank pages, and document/page viewer).
+- In M2-I, connect extracted DocumentRecord objects from SQLite into EvidenceRetrievalService(documents) to link retrieval results to the UI evidence viewer.
