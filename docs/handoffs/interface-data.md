@@ -1,7 +1,7 @@
-Updated: 2026-10-24T15:35:00+05:30
+Updated: 2026-10-24T15:38:00+05:30
 Owner / task: OWNER A / M6-A & Interface/Export side of M6-I (Hospital Reference Display & Deterministic HTML Packet Export)
-Branch / implementation commit or PR: feat/m6-hospital-and-packet-export
-Delivery state: ready for review (awaiting teammate review and merge authorisation)
+Branch / implementation commit or PR: main (merge commit fe0e353)
+Delivery state: integrated
 Implemented:
 1. Hospital Information Display (`src/admitsense/documents/hospital_directory.py` & UI):
    - Created `LocalSyntheticHospitalDirectory` implementing `HospitalLookupService` protocol conforming to CONTRACTS.md Section 2.6 and Section 3.4.
