@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Tuple
+from typing import Any, Tuple
 
 from admitsense.documents.extractor import normalize_whitespace
 from admitsense.schemas import Evidence
@@ -37,15 +37,54 @@ class SqliteEvidenceRetrieval:
                 return None
             return row["text"]
 
+    def list_documents(self, case_id: str | None = None) -> list[Any]:
+        """List DocumentRecord objects for a given case."""
+        from admitsense.documents.models import DocumentRecord
+
+        with self.db.get_connection() as conn:
+            query = "SELECT * FROM documents"
+            params: list[object] = []
+            if case_id:
+                query += " WHERE case_id = ?"
+                params.append(case_id)
+            query += " ORDER BY uploaded_at DESC"
+            rows = conn.execute(query, params).fetchall()
+            return [
+                DocumentRecord(
+                    document_id=r["document_id"],
+                    case_id=r["case_id"],
+                    filename=r["filename"],
+                    version=r["version"],
+                    sha256=r["sha256"],
+                    evidence_type=r["evidence_type"],
+                    uploaded_at=r["uploaded_at"],
+                    extraction_status=r["extraction_status"],
+                    total_pages=r["total_pages"],
+                    file_path=r["file_path"],
+                    error_message=r["error_message"],
+                )
+                for r in rows
+            ]
+
     def verify_citation(
         self,
         evidence: Evidence,
+        case_id: str | None = None,
     ) -> Tuple[bool, str]:
         """
         Validates that evidence.quote appears within the specified document_id,
         version, and 1-based page number (after standard whitespace normalisation).
         Returns (is_valid, reason).
         """
+        if case_id:
+            with self.db.get_connection() as conn:
+                doc_row = conn.execute(
+                    "SELECT case_id FROM documents WHERE document_id = ? AND version = ?",
+                    (evidence.document_id, evidence.document_version),
+                ).fetchone()
+                if doc_row and doc_row["case_id"] != case_id:
+                    return False, f"Document '{evidence.document_id}' belongs to another case."
+
         page_text = self.get_page_text(
             document_id=evidence.document_id,
             version=evidence.document_version,
