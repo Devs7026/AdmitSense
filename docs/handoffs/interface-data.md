@@ -1,7 +1,7 @@
-Updated: 2026-10-24T11:51:00+05:30
+Updated: 2026-10-24T11:55:00+05:30
 Owner / task: OWNER A / M2-A
-Branch / implementation commit or PR: feat/m2-pdf-ingestion
-Delivery state: local
+Branch / implementation commit or PR: main (commit 1499041)
+Delivery state: merged
 Implemented:
 - PDF upload validation & configuration in src/admitsense/documents/models.py:
   - UploadValidationConfig: 10 MB maximum file size, 50 maximum physical pages, .pdf extension check.
