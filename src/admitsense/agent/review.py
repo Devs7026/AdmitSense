@@ -197,6 +197,13 @@ class BoundedReviewAgent:
 
         budget_blocked = False
 
+        def is_timed_out() -> bool:
+            nonlocal timed_out
+            if timed_out or (time.monotonic() - start_time >= timeout):
+                timed_out = True
+                return True
+            return False
+
         # ----------------------------------------------------------------------
         # Pre-dispatch Tool Call Gatekeeper
         # ----------------------------------------------------------------------
@@ -209,8 +216,7 @@ class BoundedReviewAgent:
             nonlocal tool_steps_used, timed_out, budget_blocked
 
             # 1. Check timeout before dispatch
-            if time.monotonic() - start_time >= timeout:
-                timed_out = True
+            if is_timed_out():
                 raise TimeoutError(f"Review execution exceeded timeout of {timeout:.2f}s.")
 
             # 2. Strict Pre-Dispatch Budget Check (call 9 NEVER happens)
@@ -987,7 +993,7 @@ class BoundedReviewAgent:
         # ----------------------------------------------------------------------
         # Stop Reason and Status Determination
         # ----------------------------------------------------------------------
-        if timed_out:
+        if is_timed_out():
             stopped_reason: StopReason = "timeout"
             review_status: ReviewStatus = "incomplete"
             stop_details = f"Review execution exceeded timeout of {timeout:.2f}s. Validated partial findings preserved."
