@@ -82,18 +82,43 @@ class DocumentStorage:
                 if existing_record:
                     return existing_record, True
 
-        # Generate stable document_id based on base filename
+        # Generate stable document_id based on base filename and case scoping if needed
         stem = Path(filename).stem
-        doc_id = f"doc-{_slugify(stem)}"
+        base_doc_id = f"doc-{_slugify(stem)}"
+        case_scoped_id = f"{base_doc_id}-{case_id}"
 
-        # Compute next immutable version
         with self.db.get_connection() as conn:
+            # Check if this case already has this document registered
+            existing_for_this_case = conn.execute(
+                """
+                SELECT document_id FROM documents
+                WHERE case_id = ? AND (document_id = ? OR document_id = ?)
+                LIMIT 1
+                """,
+                (case_id, base_doc_id, case_scoped_id),
+            ).fetchone()
+
+            if existing_for_this_case:
+                doc_id = existing_for_this_case["document_id"]
+            else:
+                # If base_doc_id is already in use by a DIFFERENT case, scope with case_id
+                used_by_diff_case = conn.execute(
+                    "SELECT 1 FROM documents WHERE document_id = ? AND case_id != ? LIMIT 1",
+                    (base_doc_id, case_id),
+                ).fetchone()
+
+                if used_by_diff_case:
+                    doc_id = case_scoped_id
+                else:
+                    doc_id = base_doc_id
+
+            # Compute next immutable version for this document_id
             version_rows = conn.execute(
                 """
                 SELECT version FROM documents
-                WHERE case_id = ? AND document_id = ?
+                WHERE document_id = ?
                 """,
-                (case_id, doc_id),
+                (doc_id,),
             ).fetchall()
 
             existing_versions = [r["version"] for r in version_rows]

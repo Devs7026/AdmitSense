@@ -272,3 +272,47 @@ def test_evidence_retrieval_and_citation_verification(test_env):
     assert ver == doc.version
     assert page_num == 14
     assert "joint" in snippet.lower() and "replacement" in snippet.lower()
+
+
+def test_multiple_cases_uploading_same_document_filename(test_env):
+    """Verifies that when two distinct cases upload documents with identical filenames,
+    no UNIQUE constraint error occurs and both documents are correctly isolated.
+    """
+    storage = test_env["doc_storage"]
+    case_repo = test_env["case_repo"]
+    case1 = case_repo.get_case("case-m2-001")
+    case2 = case_repo.get_case("case-m2-002")
+
+    pdf_bytes = build_synthetic_policy_pdf()
+
+    # Case 1 uploads Care_Health_Gold_Policy_Wording.pdf
+    doc1, is_dup1 = storage.save_document(
+        case_id=case1.case_id,
+        filename="Care_Health_Gold_Policy_Wording.pdf",
+        content=pdf_bytes,
+        evidence_type="policy_wording",
+    )
+    assert is_dup1 is False
+    assert doc1.version == "v1"
+    assert doc1.case_id == case1.case_id
+
+    # Case 2 uploads Care_Health_Gold_Policy_Wording.pdf (different case, same filename)
+    doc2, is_dup2 = storage.save_document(
+        case_id=case2.case_id,
+        filename="Care_Health_Gold_Policy_Wording.pdf",
+        content=pdf_bytes,
+        evidence_type="policy_wording",
+    )
+    assert is_dup2 is False
+    assert doc2.version == "v1"
+    assert doc2.case_id == case2.case_id
+    assert doc2.document_id != doc1.document_id
+
+    # Verify both can be retrieved and pages fetched without error
+    retrieved1 = storage.get_document(doc1.document_id, doc1.version)
+    retrieved2 = storage.get_document(doc2.document_id, doc2.version)
+    assert retrieved1 is not None and retrieved1.case_id == case1.case_id
+    assert retrieved2 is not None and retrieved2.case_id == case2.case_id
+    assert len(retrieved1.pages) == 15
+    assert len(retrieved2.pages) == 15
+
