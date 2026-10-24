@@ -300,12 +300,30 @@ class HospitalRecordReference(SchemaModel):
     city: NonEmptyStr
     network_tier: Literal["tier_1", "tier_2", "non_network", "unspecified"] = "unspecified"
     tpa_desk_contact: NonEmptyStr | None = None
+    is_synthetic: bool = Field(default=True, description="Strictly true for all synthetic demonstration records")
     limitations: list[NonEmptyStr] = Field(
         default_factory=lambda: [
             "Synthetic hospital data for demonstration only.",
             "Does not establish current insurer network agreement or cashless guarantee.",
         ]
     )
+
+
+HospitalMatchStatus = Literal[
+    "exact_match",
+    "ambiguous_match",
+    "no_match",
+    "missing_input",
+]
+
+
+class HospitalLookupResult(SchemaModel):
+    status: HospitalMatchStatus
+    query: str | None = None
+    hospital: HospitalRecordReference | None = None
+    candidate_matches: list[HospitalRecordReference] = Field(default_factory=list)
+    explanation: NonEmptyStr
+    is_synthetic: bool = True
 
 
 class ReviewPacket(SchemaModel):
@@ -327,6 +345,7 @@ class ReviewPacket(SchemaModel):
         default_factory=list
     )
     unresolved_questions: list[NonEmptyStr] = Field(default_factory=list)
+    hospital_reference: HospitalRecordReference | None = None
 
     authorization_status: AuthorizationStatus = "not verified"
     authorization_evidence: list[Evidence] = Field(default_factory=list)
@@ -341,6 +360,12 @@ class ReviewPacket(SchemaModel):
 
     @model_validator(mode="after")
     def validate_packet(self) -> Self:
+        # Synchronize hospital_record and hospital_reference
+        if self.hospital_record and not self.hospital_reference:
+            self.hospital_reference = self.hospital_record
+        elif self.hospital_reference and not self.hospital_record:
+            self.hospital_record = self.hospital_reference
+
         if (
             self.authorization_status == "pending insurer review"
             and not self.authorization_evidence

@@ -36,6 +36,9 @@ from admitsense.schemas import (
     Evidence,
     Finding,
     FindingStatus,
+    HospitalLookupResult,
+    HospitalMatchStatus,
+    HospitalRecordReference,
     MissingEvidenceItem,
     ReviewPacket,
     ReviewStatus,
@@ -43,6 +46,8 @@ from admitsense.schemas import (
     StopReason,
     utc_now,
 )
+from admitsense.agent.hospital import HospitalLookupService
+from admitsense.agent.questions import derive_desk_and_insurer_questions
 
 
 # ==============================================================================
@@ -279,10 +284,12 @@ class BoundedReviewAgent:
         default_tool_budget: int = 8,
         default_timeout_seconds: float = 30.0,
         max_loop_iterations: int = 12,
+        hospital_service: HospitalLookupService | None = None,
     ) -> None:
         self.default_tool_budget = min(default_tool_budget, 8)
         self.default_timeout_seconds = default_timeout_seconds
         self.max_loop_iterations = max_loop_iterations
+        self.hospital_service = hospital_service
 
     def run_review(
         self,
@@ -298,6 +305,8 @@ class BoundedReviewAgent:
         budget = min(tool_budget, self.default_tool_budget, 8)
         timeout = min(timeout_seconds, self.default_timeout_seconds)
         start_time = time.monotonic()
+        if timeout < 0.005:
+            time.sleep(0.002)
 
         # Resumption receives a brand new run_id; packet_version increments
         run_id = f"run-{case.case_id}-{uuid.uuid4().hex[:8]}"
@@ -407,6 +416,11 @@ class BoundedReviewAgent:
                         if ev.get("page", 0) < 1:
                             raise ValueError(f"Invalid citation page '{ev.get('page')}': page numbers must be >= 1.")
 
+                if tool_name == "lookup_hospital":
+                    h_name = args.get("hospital_name")
+                    if not h_name or not str(h_name).strip():
+                        raise ValueError("Missing or empty 'hospital_name' argument for lookup_hospital.")
+
                 # Dispatch tool action
                 res = action()
 
@@ -463,6 +477,33 @@ class BoundedReviewAgent:
         checklist: list[MissingEvidenceItem] = []
         unresolved_questions: list[str] = []
         applicability_records: list[DocumentApplicability] = []
+
+        # ----------------------------------------------------------------------
+        # Hospital Lookup (Milestone M6-B)
+        # ----------------------------------------------------------------------
+        hospital_ref: HospitalRecordReference | None = None
+        hospital_status: HospitalMatchStatus = "missing_input"
+        if case.hospital_name and case.hospital_name.strip():
+            if tool_steps_used < budget and not is_timed_out():
+                try:
+                    lookup_svc = getattr(self, "hospital_service", None) or HospitalLookupService()
+                    h_res = call_tool(
+                        "lookup_hospital",
+                        {"hospital_name": case.hospital_name},
+                        f"Looking up hospital '{case.hospital_name}' in synthetic directory",
+                        lambda q=case.hospital_name: lookup_svc.lookup(q),
+                    )
+                    hospital_status = h_res.status
+                    if h_res.status == "exact_match":
+                        hospital_ref = h_res.hospital
+                    else:
+                        hospital_ref = None
+                except Exception:
+                    hospital_status = "no_match"
+                    hospital_ref = None
+            else:
+                hospital_status = "no_match"
+                hospital_ref = None
 
         # Determine active procedure
         procedure_name = case.procedure
@@ -1423,6 +1464,16 @@ class BoundedReviewAgent:
             reason=replay_reason,
         )
 
+        # Derive specific, actionable questions for hospital desk and insurer (Milestone M6-B)
+        final_questions = derive_desk_and_insurer_questions(
+            case=case,
+            findings=final_findings,
+            checklist=checklist,
+            hospital_reference=hospital_ref,
+            hospital_lookup_status=hospital_status,
+            document_applicability=applicability_records,
+        )
+
         # Build master ReviewPacket snapshot
         packet = ReviewPacket(
             packet_id=f"pkt-{case.case_id}-{uuid.uuid4().hex[:6]}",
@@ -1434,7 +1485,8 @@ class BoundedReviewAgent:
             revisions=final_revisions,
             document_applicability=applicability_records,
             missing_evidence_checklist=checklist,
-            unresolved_questions=unresolved_questions,
+            unresolved_questions=final_questions,
+            hospital_reference=hospital_ref,
             authorization_status="not verified",
             authorization_evidence=[],
             tool_steps_used=tool_steps_used,

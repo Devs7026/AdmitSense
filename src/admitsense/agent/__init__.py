@@ -11,6 +11,8 @@ from admitsense.agent.retrieval import (
     PageSearchResult,
     normalize_whitespace,
 )
+from admitsense.agent.hospital import HospitalLookupService
+from admitsense.agent.questions import derive_desk_and_insurer_questions
 from admitsense.agent.review import (
     BoundedReviewAgent,
     ToolActivityEvent,
@@ -27,11 +29,13 @@ __all__ = [
     "EvidenceRetrievalService",
     "ExtractedPage",
     "ExtractionStatus",
+    "HospitalLookupService",
     "PageOutOfBoundsError",
     "PageSearchResult",
     "ToolActivityEvent",
     "WaitingPeriodReviewer",
     "compute_evidence_replay",
+    "derive_desk_and_insurer_questions",
     "normalize_whitespace",
     "run_waiting_period_review",
 ]

@@ -88,7 +88,7 @@ def generate_review_packet_html(
         A standalone HTML5 string ready for browser rendering or offline saving.
     """
     case = packet.case
-    active_hospital = hospital_record or packet.hospital_record
+    active_hospital = hospital_record or packet.hospital_record or getattr(packet, "hospital_reference", None)
     if active_hospital is None and hospital_result and hospital_result.record:
         active_hospital = hospital_result.record
 

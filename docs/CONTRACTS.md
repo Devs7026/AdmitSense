@@ -331,11 +331,11 @@ class ToolActivityEvent(BaseModel):
     timestamp: datetime
 ```
 
-### 3.4 Synthetic Hospital Record Schema (AGREED - M6)
-Hospital reference data is strictly separate from PDF citations and contains explicit dataset versions and dates:
+### 3.4 Synthetic Hospital Record & Export Data Schema (AGREED - M6)
+Hospital reference data is strictly separate from PDF citations and contains explicit dataset versions and dates. Export payloads consume saved snapshots deterministically without triggering live model invocations:
 ```python
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 class HospitalRecordReference(BaseModel):
@@ -346,12 +346,45 @@ class HospitalRecordReference(BaseModel):
     city: str
     network_tier: Literal["tier_1", "tier_2", "non_network", "unspecified"] = "unspecified"
     tpa_desk_contact: str | None = None
+    is_synthetic: bool = True
     limitations: list[str] = Field(
         default_factory=lambda: [
             "Synthetic hospital data for demonstration only.",
             "Does not establish current insurer network agreement or cashless guarantee."
         ]
     )
+
+HospitalMatchStatus = Literal[
+    "exact_match",
+    "ambiguous_match",
+    "no_match",
+    "missing_input",
+]
+
+class HospitalLookupResult(BaseModel):
+    status: HospitalMatchStatus
+    query: str | None = None
+    hospital: HospitalRecordReference | None = None
+    candidate_matches: list[HospitalRecordReference] = []
+    explanation: str
+    is_synthetic: bool = True
+
+def derive_desk_and_insurer_questions(
+    case: CaseDetails,
+    findings: list[Finding],
+    checklist: list[MissingEvidenceItem] = [],
+    hospital_reference: HospitalRecordReference | None = None,
+    hospital_lookup_status: HospitalMatchStatus | None = None,
+    document_applicability: list[DocumentApplicability] = [],
+) -> list[str]:
+    """Derives actionable questions for hospital desk and insurer staff.
+    Removes obsolete questions once finding is supported. Retains unresolved gaps."""
+    ...
+
+def build_review_export_payload(packet: ReviewPacket) -> dict[str, Any]:
+    """Pure deterministic transformation of saved ReviewPacket snapshot into
+    structured, HTML-escapable export payload for Owner A's M6-A export preview."""
+    ...
 ```
 
 ### 3.5 Evidence Change Replay Contract & Interfaces (AGREED - M5)

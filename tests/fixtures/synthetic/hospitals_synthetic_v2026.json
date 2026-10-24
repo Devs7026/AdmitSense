@@ -41,6 +41,19 @@
         "Synthetic hospital data for demonstration only.",
         "Does not establish current insurer network agreement or cashless guarantee."
       ]
+    },
+    {
+      "record_id": "hosp-synth-004",
+      "dataset_version": "v2026.1",
+      "dataset_date": "2026-10-01",
+      "hospital_name": "City Care Specialty Hospital",
+      "city": "Bengaluru",
+      "network_tier": "tier_2",
+      "tpa_desk_contact": "+91-80-5555-0188",
+      "limitations": [
+        "Synthetic hospital data for demonstration only.",
+        "Does not establish current insurer network agreement or cashless guarantee."
+      ]
     }
   ]
 }
