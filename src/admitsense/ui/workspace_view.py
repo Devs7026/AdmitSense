@@ -1321,7 +1321,8 @@ def render_workspace_view(
             with st.expander(f"📄 3. Documents Reviewed ({len(documents)})", expanded=False):
                 if documents:
                     for d in documents:
-                        st.markdown(f"- **{d.filename}** (`{d.document_id}`, {d.version}) — {d.page_count} pages [{d.extraction_status}]")
+                        pages_cnt = getattr(d, "total_pages", getattr(d, "page_count", len(getattr(d, "pages", []))))
+                        st.markdown(f"- **{d.filename}** (`{d.document_id}`, {d.version}) — {pages_cnt} pages [{d.extraction_status}]")
                 else:
                     st.caption("No document records attached.")
 
